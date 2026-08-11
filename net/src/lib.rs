@@ -23,6 +23,7 @@
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
+use clarity_core::transport::{MessageTransport, TransportError};
 use clarity_core::PreKeyBundle;
 use clarity_relay::protocol::{
     BundleResponse, OneTimePrekey, PollResponse, PublishRequest, SendRequest,
@@ -129,6 +130,19 @@ impl RelayTransport {
 
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url.trim_end_matches('/'), path)
+    }
+}
+
+/// The relay satisfies the transport-agnostic [`MessageTransport`] seam, so an
+/// app can hold `Box<dyn MessageTransport>` and swap relay/Tor for a Bluetooth
+/// mesh without touching protocol code.
+impl MessageTransport for RelayTransport {
+    fn send(&self, recipient: &[u8; 32], payload: &[u8]) -> Result<(), TransportError> {
+        RelayTransport::send(self, recipient, payload).map_err(|e| TransportError(e.to_string()))
+    }
+
+    fn receive(&self, me: &[u8; 32]) -> Result<Vec<Vec<u8>>, TransportError> {
+        self.poll(me).map_err(|e| TransportError(e.to_string()))
     }
 }
 

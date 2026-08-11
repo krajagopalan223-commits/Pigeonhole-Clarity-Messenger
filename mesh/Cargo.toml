@@ -1,0 +1,18 @@
+[package]
+name = "clarity-mesh"
+description = "Bluetooth store-carry-forward mesh routing for Clarity (transport-only; radio is platform-provided)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "clarity_mesh"
+
+[dependencies]
+clarity-core = { path = "../core" }
+serde = { workspace = true }
+bincode = { workspace = true }
+getrandom = { workspace = true }
+
+[dev-dependencies]
+clarity-core = { path = "../core" }

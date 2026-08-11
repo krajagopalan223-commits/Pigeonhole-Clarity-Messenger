@@ -20,9 +20,13 @@ the source specification.
 | [`ffi/`](ffi) | `clarity-ffi`: C ABI over the core for `dart:ffi` | ✅ built, 4 tests |
 | [`relay/`](relay) | `clarity-relay`: thin zero-plaintext store-and-forward server | ✅ built, 3 tests |
 | [`net/`](net) | `clarity-net`: relay transport with first-class Tor (SOCKS5/onion) support | ✅ built, 3 tests |
+| [`mesh/`](mesh) | `clarity-mesh`: Bluetooth store-carry-forward mesh routing (no-infrastructure messaging) | ✅ built, 6 tests |
 | [`app/`](app) | Flutter app for iOS/Android/Linux, one codebase | ✅ code complete; runner folders via `flutter create` |
 
-Hardening docs: [`SECURITY.md`](SECURITY.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`TEE.md`](TEE.md) (enclave/secure-hardware) · [`TOR.md`](TOR.md) (metadata-protecting transport).
+All transports share one `MessageTransport` seam in the core, so the app can pick
+relay/Tor or Bluetooth mesh per conversation — or run several at once.
+
+Hardening docs: [`SECURITY.md`](SECURITY.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`TEE.md`](TEE.md) (enclave/secure-hardware) · [`TOR.md`](TOR.md) (metadata-protecting transport) · [`MESH.md`](MESH.md) (off-grid Bluetooth transport).
 
 ### Security properties (the ones we actually claim)
 

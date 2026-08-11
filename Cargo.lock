@@ -148,6 +148,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clarity-mesh"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "clarity-core",
+ "getrandom",
+ "serde",
+]
+
+[[package]]
 name = "clarity-net"
 version = "0.1.0"
 dependencies = [

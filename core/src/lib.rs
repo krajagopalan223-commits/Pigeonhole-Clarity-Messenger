@@ -47,6 +47,7 @@ pub mod pqkem;
 pub mod ratchet;
 pub mod safety;
 pub mod session;
+pub mod transport;
 pub mod wire;
 
 pub use enclave::{Enclave, Sealed};
@@ -54,6 +55,7 @@ pub use error::{Error, Result};
 pub use identity::{verify_bundle, Account};
 pub use safety::safety_number;
 pub use session::Session;
+pub use transport::{MessageTransport, TransportError};
 pub use wire::{HandshakeHeader, Message, PreKeyBundle, RatchetHeader, PROTOCOL_VERSION};
 
 #[cfg(test)]

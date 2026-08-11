@@ -5,6 +5,7 @@ members = [
     "ffi",
     "relay",
     "net",
+    "mesh",
 ]
 
 [workspace.package]
