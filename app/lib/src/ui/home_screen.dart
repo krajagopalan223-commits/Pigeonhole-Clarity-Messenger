@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/models.dart';
+import '../services/transport_config.dart';
 import '../state/app_state.dart';
 import 'chat_screen.dart';
 
@@ -25,6 +26,11 @@ class HomeScreen extends StatelessWidget {
           appBar: AppBar(
             title: const Text('Clarity'),
             actions: [
+              IconButton(
+                icon: Icon(_transportIcon(state.config.mode)),
+                tooltip: 'Transport',
+                onPressed: () => _transportSettings(context),
+              ),
               IconButton(
                 icon: const Icon(Icons.fingerprint),
                 tooltip: 'Your identity',
@@ -50,6 +56,79 @@ class HomeScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  IconData _transportIcon(TransportMode mode) {
+    switch (mode) {
+      case TransportMode.relayDirect:
+        return Icons.cloud_outlined;
+      case TransportMode.relayTor:
+        return Icons.shield_outlined;
+      case TransportMode.mesh:
+        return Icons.bluetooth;
+    }
+  }
+
+  Future<void> _transportSettings(BuildContext context) async {
+    final current = state.config;
+    var useTor = current.mode == TransportMode.relayTor;
+    final urlCtrl = TextEditingController(text: current.relayUrl);
+    final socksCtrl = TextEditingController(text: current.torSocks);
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Transport'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Route over Tor'),
+                subtitle: const Text('Hides your IP from the relay and network'),
+                value: useTor,
+                onChanged: (v) => setLocal(() => useTor = v),
+              ),
+              TextField(
+                controller: urlCtrl,
+                decoration: const InputDecoration(labelText: 'Relay URL (.onion allowed on Tor)'),
+              ),
+              if (useTor)
+                TextField(
+                  controller: socksCtrl,
+                  decoration: const InputDecoration(labelText: 'Tor SOCKS5 (host:port)'),
+                ),
+              const SizedBox(height: 12),
+              const Text(
+                'Bluetooth mesh (offline) requires a radio plugin and broadcasts '
+                'your presence — enable it deliberately, not for anonymity.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Apply')),
+          ],
+        ),
+      ),
+    );
+
+    if (saved != true) return;
+    final newConfig = current.copyWith(
+      mode: useTor ? TransportMode.relayTor : TransportMode.relayDirect,
+      relayUrl: urlCtrl.text.trim(),
+      torSocks: socksCtrl.text.trim(),
+    );
+    try {
+      await state.setConfig(newConfig);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Transport change failed: $e')));
+      }
+    }
   }
 
   void _showMyIdentity(BuildContext context) {

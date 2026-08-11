@@ -1,0 +1,174 @@
+# Implementation Status
+
+An honest, section-by-section accounting of what exists in this repository,
+what is deliberately deferred, and what was rejected — mapped against the
+original [Clarity Technical Specification](docs/source/clarity-technical-specification-v1.0.txt).
+
+**Version:** v0.1 foundation · **Tests:** 36 passing across 5 Rust crates ·
+**Code:** ~4,100 lines Rust, ~1,700 lines Dart · **Audited:** no.
+
+Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
+🔜 deferred (planned) · ❌ rejected (with reason)
+
+---
+
+## 1. At a glance
+
+| Area | Status |
+|------|--------|
+| End-to-end encryption (1:1) | ✅ |
+| Post-quantum handshake (ML-KEM-1024) | ✅ |
+| Double Ratchet (forward secrecy + break-in recovery) | ✅ |
+| Untrusted prekey server / MITM-resistant key exchange | ✅ |
+| Safety numbers (out-of-band verification) | ✅ |
+| Session + account persistence | ✅ |
+| Store-and-forward relay (offline delivery) | ✅ |
+| Tor transport (`.onion`, SOCKS5) | ✅ |
+| Bluetooth mesh (off-grid, store-carry-forward) | ✅ routing / 🟡 radio |
+| TEE / enclave boundary | ✅ boundary / 🔜 hardware binding |
+| Flutter app (iOS · Android · Linux) | 🟡 code complete, unbuilt |
+| Group messaging | 🔜 (via MLS) |
+| Metadata minimization (sealed sender, rotating IDs) | 🔜 |
+| Onion network of our own, CLR token, steganography | ❌ |
+| Independent security audit | 🔜 **required before real use** |
+
+---
+
+## 2. What is built and tested
+
+### `clarity-core` — the cryptographic core (17 tests)
+`#![forbid(unsafe_code)]`, no home-grown cryptography.
+
+- **Identity & prekeys** — Ed25519 identity key, X25519 identity DH key, signed
+  prekey, ML-KEM-1024 prekey, and a pool of one-time prekeys. Matches the
+  spec's §9.1 three-tier hierarchy (IK / SPK / OPK).
+- **PQXDH handshake** — X3DH (four X25519 DH terms) **plus** an ML-KEM-1024
+  encapsulation, all combined through HKDF-SHA256. Delivers the spec's §11.4
+  "harvest now, decrypt later" goal.
+- **Double Ratchet** — symmetric chain ratchet per message (forward secrecy) and
+  DH ratchet per round-trip (break-in recovery), with bounded out-of-order and
+  skipped-key handling.
+- **Signed prekey bundles** — every field signed by the identity key and verified
+  client-side, so a malicious prekey server cannot MITM (spec §9.4). Verified by
+  test: a substituted identity key and a flipped prekey byte are both rejected.
+- **Safety numbers** — 60-digit, order-independent fingerprints for out-of-band
+  verification.
+- **Persistence** — account and full session state serialize and restore;
+  conversations survive an app restart.
+- **Enclave boundary** — a stateless `Enclave` where all secrets cross into the
+  untrusted host **only as sealed AEAD blobs** (see [`TEE.md`](TEE.md)).
+
+Tests cover: bidirectional conversations, 50-message bursts, out-of-order and
+dropped delivery, tamper rejection, MITM/bundle-substitution rejection, one-time
+prekey consumption, mid-conversation serialize/restore, and full conversations
+driven entirely through the sealed enclave ABI.
+
+### `clarity-relay` — store-and-forward server (3 tests)
+Prekey directory (one one-time prekey dispensed per fetch) plus an offline
+mailbox holding opaque ciphertext. JSON API: `/publish`, `/bundle`, `/send`,
+`/poll`, `/health`. **Sees no plaintext, ever.**
+
+### `clarity-net` — relay transport, direct or over Tor (3 tests)
+Same wire protocol either way; the Tor mode routes through a SOCKS5 proxy
+(system `tor` / Orbot) and supports relays published as `.onion` hidden
+services, so neither the relay nor the network learns the client's IP.
+See [`TOR.md`](TOR.md).
+
+### `clarity-mesh` — Bluetooth store-carry-forward mesh (6 tests)
+TTL-bounded flooding, `msg_id` dedup, carry-forward store, recipient matching,
+and bounded memory against floods. Tests prove multi-hop delivery, dedup, TTL
+limits, **carry-forward across a disconnected mesh** (a courier physically
+carries a message between two nodes that never meet), and a real end-to-end
+encrypted message relayed by a courier that cannot read it. See [`MESH.md`](MESH.md).
+
+### `clarity-ffi` — C ABI for the app (7 tests)
+Opaque handles with documented ownership rules, plus a hand-written header
+([`ffi/include/clarity.h`](ffi/include/clarity.h)). Exposes accounts, sessions,
+session persistence, safety numbers, the relay/Tor transport, and the mesh node.
+Tests drive the whole protocol **through the C ABI only**, including a live
+relay round-trip.
+
+### `app/` — Flutter client (iOS · Android · Linux)
+One Dart codebase: `dart:ffi` bindings, a memory-safe wrapper, a background
+**isolate** for blocking relay/Tor calls, a mesh bridge, secure-storage
+persistence of account/contacts/sessions, a transport switcher (direct/Tor), and
+chat + safety-number UI.
+
+---
+
+## 3. What needs device work before it runs
+
+These are written and reviewed but cannot be compiled or exercised in this
+environment. Treat them as **unverified until run on a real target**.
+
+| Item | What's needed |
+|------|---------------|
+| **Flutter app build** | Flutter isn't installed here. Generate runner folders (`flutter create --platforms=android,ios,linux .`), build the native lib (`tool/build_rust.sh`), then `flutter run`. Dart code is unanalyzed and unrun — expect ordinary compile fixes on first build. |
+| **Bluetooth radio** | `clarity-mesh` is routing only. A platform plugin must implement the `MeshRadio` interface (Android Nearby/BLE, iOS MultipeerConnectivity, Linux BlueZ). |
+| **Tor on device** | Needs a running Tor: system daemon (Linux), Orbot (Android), or an embedded Tor/Arti (iOS). |
+| **TEE hardware binding** | The enclave sealing key is currently OS-random in process memory. Binding it to Secure Enclave / StrongBox / TPM is per-platform work (see [`TEE.md`](TEE.md) Level 1). |
+
+---
+
+## 4. Deferred (planned, not built)
+
+| Feature | Why deferred / what it needs |
+|---------|------------------------------|
+| **Group messaging** (spec §6 TreeKEM) | Should use an audited **MLS (RFC 9420)** library, not a bespoke TreeKEM. The spec's own design signs every group message while claiming deniability — contradictory; MLS handles this deliberately. |
+| **Sealed sender + rotating inbox IDs** (spec §8.5) | The best remaining metadata win: route to `BLAKE3(identity ‖ epoch)` instead of raw identity keys, and hide the sender field. The spec's idea is sound and should be adopted. |
+| **Cover traffic, padding, timing noise** (spec §8.2–8.4) | Fixed-size padding is cheap and worth doing. Cover traffic and timing noise have real battery/latency costs and should be measured, not assumed. |
+| **In-enclave execution** (TEE Level 2) | Running the ratchet inside SGX/TrustZone. Needs the platform SDK and a `no_std` build. |
+| **`no_std` core** | Only required for bare-metal enclaves (Fortanix SGX-EDP, Trusty). Mainstream runtimes (Gramine, Occlum, OP-TEE) run the current `std` build as-is. |
+| **Multi-device sync & recovery** (spec §9.3) | BIP-39 recovery phrase and multi-device registration. Needs careful design — recovery is where most messengers leak. |
+| **Disappearing messages** (spec §10.4) | Straightforward once sessions persist; retention policy + key wiping. |
+| **Post-quantum signatures** (spec §11.3 Phase 2) | ML-DSA/Dilithium to replace Ed25519. Reasonable roadmap item; not urgent, since signatures aren't subject to harvest-now-decrypt-later. |
+| **Client hardening** (spec §10.1) | Screen-capture blocking, clipboard protection, binary integrity. Worth doing. Note: **jailbreak/root detection is not a security boundary** — it is trivially bypassed by the attacker it claims to stop. |
+| **Independent security audit** | **The single most important remaining item.** Nothing here should protect anyone at risk until this happens. |
+
+---
+
+## 5. Rejected, and why
+
+These were in the source documents and are **not** being built as specified.
+
+| Proposal | Why rejected |
+|----------|--------------|
+| **Custom 5-hop onion network** (spec §7.2, §8.1) | Building a new anonymity network is a multi-year research project, and a small one is *less* anonymous than a large mature one — anonymity loves crowds. Tor is used instead, which achieves the actual goal today. |
+| **PBFT consensus for message ordering** (spec §7.3) | Byzantine consensus is for agreeing on a *shared ordered log*. Point-to-point message delivery does not need global ordering; this adds enormous complexity for no security gain. |
+| **CLR utility token, staking, slashing** (spec §7.4) | A cryptoeconomic system, not a messaging feature. It introduces financial/regulatory risk and a Sybil problem it does not actually solve. Self-hosted and volunteer relays cover the need. |
+| **Steganographic transports** | Largely detectable in practice; Tor pluggable transports do this better, and badly-done steganography actively endangers users by giving false confidence. |
+| **Redundant `HMAC-SHA3-256` per packet** (spec §4.4) | The AEAD tag already authenticates. A second MAC adds key management surface and bugs, not security. |
+| **Timestamp/counter-derived nonces** (spec §4.3) | Nonces are derived by HKDF from unique per-message ratchet keys instead. Timestamps collide; the spec's own claim that "nonce reuse is cryptographically impossible" did not hold for its construction. |
+| **"Nonce misuse resistance" of ChaCha20-Poly1305** (spec §3.2) | **Factually false** — nonce reuse leaks the Poly1305 key and breaks integrity. Switched to XChaCha20-Poly1305 with per-message derived nonces so the failure mode cannot occur. |
+| **Kernel-level installation** (requested in discussion) | The kernel is the most *privileged* code, not the most *secure*. A parser bug at ring 0 is total system compromise. The correct inversion — isolating secrets *from* the kernel in a TEE — was built instead. |
+| **Claimed audits, users, and infrastructure** | Removed entirely. See [`docs/source/README.md`](docs/source/README.md). |
+
+---
+
+## 6. Known limitations (say these out loud)
+
+1. **Not audited.** No third party has reviewed this code.
+2. **Metadata.** The relay learns the contact graph unless you run over Tor.
+   Both the relay and the mesh route by a stable identity key today.
+3. **The mesh broadcasts presence.** Joining a Bluetooth mesh announces that you
+   run Clarity and roughly where you are. It is for reachability when
+   infrastructure is gone — **not** for anonymity. Tor is the opposite trade.
+4. **The app is unbuilt.** Dart code has never been compiled or run.
+5. **The relay is a reference implementation** — in-memory, no auth, no rate
+   limiting, no durable storage.
+6. **1:1 only.** No group messaging.
+7. **Endpoint compromise is out of scope**, as the spec itself acknowledges
+   (§2.3). Malware on an unlocked device reads plaintext; no messenger prevents
+   this.
+
+---
+
+## 7. Suggested order of work
+
+1. **Build and run the Flutter app** on one platform end-to-end (Linux is
+   fastest) — this is the first real integration test of the whole stack.
+2. **Independent security review** of `clarity-core` before anything ships.
+3. **Sealed sender + rotating inbox IDs** — the biggest remaining privacy win.
+4. **Bind the enclave key to secure hardware** (TEE Level 1).
+5. **Group messaging via MLS.**
+6. **A Bluetooth radio plugin** to make the mesh real on a device.

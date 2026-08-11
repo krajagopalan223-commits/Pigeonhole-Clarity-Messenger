@@ -23,6 +23,23 @@ class Clarity {
   /// Open the native library once and cache it.
   static Clarity instance() => _instance ??= Clarity._(ClarityBindings.open());
 
+  /// The resolved bindings, for same-isolate native components (e.g. the mesh).
+  ClarityBindings get bindings => _b;
+
+  /// Restore a session persisted with [Session.serialize].
+  Session restoreSession(Uint8List bytes) {
+    final input = _toNative(bytes);
+    try {
+      final ptr = _b.sessionDeserialize(input, bytes.length);
+      if (ptr == nullptr) {
+        throw const ClarityException('failed to restore session');
+      }
+      return Session._(_b, ptr);
+    } finally {
+      malloc.free(input);
+    }
+  }
+
   /// Create a brand-new identity/account.
   Account generateAccount() => Account._(_b, _b.accountGenerate());
 
@@ -190,12 +207,33 @@ class Session {
     }
   }
 
+  /// Serialize this session so the conversation survives an app restart. The
+  /// result is SECRET — persist it only in OS secure storage.
+  Uint8List serialize() => Clarity.instance()._takeBuffer(_b.sessionSerialize(_handle));
+
   void dispose() {
     if (_disposed) return;
     _b.sessionFree(_ptr);
     _ptr = nullptr;
     _disposed = true;
   }
+}
+
+/// Decode the FFI list format `[u32 count]([u32 len][bytes])*` (little-endian)
+/// used by relay-poll and the mesh functions to return multiple buffers.
+List<Uint8List> decodeByteList(Uint8List bytes) {
+  if (bytes.length < 4) return const [];
+  final data = ByteData.sublistView(bytes);
+  final count = data.getUint32(0, Endian.little);
+  var offset = 4;
+  final out = <Uint8List>[];
+  for (var i = 0; i < count; i++) {
+    final len = data.getUint32(offset, Endian.little);
+    offset += 4;
+    out.add(Uint8List.fromList(Uint8List.sublistView(bytes, offset, offset + len)));
+    offset += len;
+  }
+  return out;
 }
 
 /// Thrown when a native clarity-core call fails.

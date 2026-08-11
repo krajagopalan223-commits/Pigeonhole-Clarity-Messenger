@@ -6,14 +6,29 @@ Rust `clarity-core` through `dart:ffi` (see `../ffi/include/clarity.h`) and to a
 
 ```
 lib/
-  main.dart                     app entry; reads --dart-define=CLARITY_RELAY
-  src/ffi/clarity_bindings.dart raw dart:ffi bindings to the C ABI
-  src/ffi/clarity.dart          safe wrapper: Clarity / Account / Session
-  src/services/relay_client.dart HTTP client for the relay
-  src/state/app_state.dart      account, sessions, contacts, polling loop
-  src/models/models.dart        UI data models
-  src/ui/                       home + chat screens
+  main.dart                        app entry; reads --dart-define transport config
+  src/ffi/clarity_bindings.dart    raw dart:ffi bindings to the C ABI
+  src/ffi/clarity.dart             safe wrapper: Clarity / Account / Session
+  src/services/transport_config.dart  transport mode (direct / Tor / mesh)
+  src/services/relay_worker.dart   background isolate owning the relay/Tor transport
+  src/services/mesh_service.dart   mesh bridge + MeshRadio interface
+  src/state/app_state.dart         account, sessions, contacts, persistence, polling
+  src/models/models.dart           UI data models
+  src/ui/                          home + chat screens
 ```
+
+## How networking works (and why it isn't in Dart)
+
+All network I/O goes through the Rust transports via FFI, not through Dart's
+HTTP stack. That is deliberate: Dart has no SOCKS support, so routing over
+**Tor** — and the Bluetooth mesh routing — must live in the native core to work
+uniformly on every platform.
+
+Relay/Tor calls **block** (a Tor request can take seconds), so `RelayWorker`
+owns them on a dedicated background **isolate**. It exchanges only *bytes* with
+the UI isolate — never `Account`/`Session` pointers — so there is no
+cross-thread access to shared native state. Mesh calls are pure computation and
+run inline.
 
 ## Why this folder isn't a full Flutter project yet
 
@@ -86,17 +101,47 @@ cd app
 flutter run --dart-define=CLARITY_RELAY=http://127.0.0.1:8080
 ```
 
+Over Tor (system `tor` on Linux, Orbot on Android), pointing at an onion relay:
+
+```bash
+flutter run \
+  --dart-define=CLARITY_RELAY=http://<relay>.onion \
+  --dart-define=CLARITY_TOR=true \
+  --dart-define=CLARITY_SOCKS=127.0.0.1:9050
+```
+
+Tor can also be toggled at runtime from the transport button in the app bar.
+
 > Android emulator note: reach a relay on the host machine at
 > `http://10.0.2.2:8080`.
 
+## Enabling the Bluetooth mesh
+
+`clarity-mesh` provides the routing; the app must supply the radio. Implement
+the `MeshRadio` interface (in `src/services/mesh_service.dart`) with a platform
+plugin — Android Nearby Connections / BLE, iOS MultipeerConnectivity, or BlueZ
+on Linux — and pass it to `AppState(meshRadio: ...)`. Then select
+`TransportMode.mesh`.
+
+Note the trade-off before enabling it: the mesh works with no internet at all,
+but joining one **broadcasts your presence**. See `../MESH.md`.
+
 ## Current limitations (honest scope)
 
-- **Sessions are in-memory.** The account (identity + prekeys) is persisted via
-  `flutter_secure_storage` (Keychain / Keystore / libsecret), but live Double
-  Ratchet session state is not serialized yet, so sessions re-establish after an
-  app restart.
-- **Relay routing is by identity key**, which exposes a contact graph to the
-  relay operator. See `../ARCHITECTURE.md` for the metadata trade-off and the
-  intended transport-layer mitigation (run over Tor; rotating inbox IDs).
+- **The app has never been compiled.** Flutter isn't available in the
+  environment this was written in, so the Dart code is unanalyzed and unrun.
+  Expect ordinary compile fixes on the first build; the Rust side underneath it
+  is fully tested.
+- **Bundle fetch needs a relay.** In pure-mesh mode there is no prekey
+  directory, so contacts must exchange bundles some other way; today
+  `addContact` requires a relay transport.
+- **Routing is by stable identity key**, which exposes a contact graph to the
+  relay operator (and the sender identity to mesh couriers). See
+  `../ARCHITECTURE.md` for the intended mitigation: run over Tor, and move to
+  rotating inbox IDs.
 - **1:1 messaging only.** Group messaging (MLS/TreeKEM) is deferred to a
   dedicated, audited implementation.
+
+Account, contacts, and live Double Ratchet **session state are persisted** via
+`flutter_secure_storage` (Keychain / Android Keystore / libsecret), so
+conversations now survive an app restart.

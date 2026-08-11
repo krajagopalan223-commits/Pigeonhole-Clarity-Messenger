@@ -1,0 +1,681 @@
+--- CLARITY PAGE 1 ---
+CLARITY MESSENGER
+Technical Architecture & Security Specification
+Version: v1.0 — August 2026
+Classification: CONFIDENTIAL — Internal Technical Distribution Only
+     
+Clarity Messenger is a next-generation encrypted communications platform engineered to exceed the 
+security guarantees of any commercially available messaging application. This document provides an 
+exhaustive technical specification of Clarity's cryptographic primitives, network architecture, authentication 
+systems, threat model, and deployment roadmap. Intended audience: security engineers, cryptographers, 
+and senior technical staff.
+Document Contents
+Executive Summary1.
+Threat Model & Security Goals2.
+Cryptographic Primitives3.
+Hybrid Encryption Protocol4.
+Perfect Forward Secrecy5.
+Group Messaging Security6.
+Network Architecture7.
+Metadata Obfuscation8.
+Zero-Knowledge Authentication9.
+Security Hardening10.
+Post-Quantum Readiness11.
+Audit & Verification12.
+Deployment Roadmap13.
+Competitive Analysis14.
+--- CLARITY PAGE 2 ---
+1. Executive Summary
+Clarity Messenger is designed from first principles to provide communications security at the level required 
+by intelligence agencies, defense contractors, and high-value targets of nation-state adversaries. Unlike 
+Signal — the current industry benchmark — Clarity encrypts not only message content but all associated 
+metadata, operates on a fully decentralized network, and incorporates post-quantum cryptographic 
+primitives from day one.
+Key security properties guaranteed by Clarity:
+End-to-end encryption of all message content and metadata
+Perfect Forward Secrecy (PFS) on every message, including group conversations
+Zero-knowledge authentication: servers never see user credentials or identity
+Post-quantum resistance via Kyber-1024 lattice-based key encapsulation
+Decentralized relay network: no single point of failure or surveillance
+Metadata obfuscation via onion routing, fixed-size packet padding, and timing noise
+Design Philosophy
+Clarity's architecture follows three core principles:
+Assume Compromise — every component is designed assuming all others may be compromised1.
+Minimize Trust — no party, including Clarity's own servers, is trusted with plaintext data2.
+Defense in Depth — multiple independent security layers ensure no single vulnerability is catastrophic3.
+--- CLARITY PAGE 3 ---
+2. Threat Model & Security Goals
+Subsection 2.1 — Adversary Classes:
+Adversary Type Capabilities Clarity's Defense
+Passive Network Eavesdropper Observes all network traffic; 
+records encrypted packets; 
+performs traffic analysis
+Onion routing + fixed 4KB packet 
+padding + timing noise injection
+Active Network Attacker Injects, replays, or modifies 
+packets in transit
+HMAC-SHA3-256 authentication 
+on all packets; replay protection 
+via nonce tracking
+Compromised Relay Node Full visibility into traffic passing 
+through the node
+Onion-encrypted layers; node sees 
+only next-hop address, never 
+sender/recipient/content
+Compromised Server / Insider Full access to server 
+infrastructure, databases, logs
+Zero-knowledge architecture; 
+servers store only encrypted 
+blobs; no plaintext ever 
+transmitted
+Nation-State / Legal Compulsion Subpoena or seizure of server 
+infrastructure
+Decentralized nodes in multiple 
+jurisdictions; no usable data 
+stored centrally
+Quantum Computer Adversary Capable of breaking RSA-2048 
+and ECDH in polynomial time
+Kyber-1024 post-quantum KEM; 
+hybrid classical+PQ key exchange
+Subsection 2.2 — Security Goals (formal):
+Confidentiality: IND-CCA2 security under chosen-ciphertext attack1.
+Integrity: Existential unforgeability under chosen-message attack (EUF-CMA)2.
+Forward Secrecy: Compromise of long-term keys does not expose past session keys3.
+Future Secrecy: Compromise of current session keys does not expose future sessions (break-in recovery)4.
+Anonymity: Sender and recipient identities are not linkable by any network observer5.
+Deniability: Messages cannot be cryptographically attributed to a specific sender post-session6.
+Subsection 2.3 — Out of Scope:
+The following threats are explicitly out of scope for this version: endpoint device compromise (OS-level malware), 
+physical coercion of users, and side-channel attacks on client hardware. These are addressed in the Clarity Endpoint 
+Hardening Guide (separate document).
+--- CLARITY PAGE 4 ---
+3. Cryptographic Primitives
+All cryptographic primitives used in Clarity are selected from NIST-approved or NIST-finalist algorithms, with preference for 
+primitives that have undergone extensive public cryptanalysis. No proprietary or custom cryptographic algorithms are used 
+anywhere in the stack.
+Subsection 3.1 — Primitive Reference Table:
+Primitive Algorithm Key Size Security Level Use Case
+Key Encapsulation (Post-
+Quantum)
+Kyber-1024 
+(CRYSTALS)
+1568-byte 
+public key
+256-bit post-
+quantum
+Session key 
+establishment
+Key Exchange (Classical) ECDH X25519 256-bit 128-bit classical Hybrid key exchange 
+fallback
+Symmetric Encryption ChaCha20-Poly1305 256-bit key 256-bit Message encryption 
+(AEAD)
+Hash Function SHA3-256 / BLAKE3 N/A 256-bit Key derivation, 
+integrity
+Message Authentication HMAC-SHA3-256 256-bit 256-bit Packet 
+authentication
+Digital Signatures Ed25519 256-bit 128-bit classical Identity key signing
+Key Derivation HKDF-SHA3-256 Variable 256-bit Session key 
+derivation from 
+shared secret
+Password Hashing Argon2id Variable Configurable Local credential 
+storage
+Subsection 3.2 — Rationale for ChaCha20-Poly1305 over AES-
+GCM:
+ChaCha20-Poly1305 is selected over AES-GCM for the following reasons:
+Constant-time implementation: ChaCha20 is inherently resistant to timing side-channels; AES requires hardware AES-NI to 
+achieve constant-time execution
+Mobile performance: ChaCha20 outperforms AES-GCM on devices without hardware AES acceleration by 30–50%
+Nonce misuse resistance: Poly1305 authentication tag provides strong integrity guarantees even under nonce reuse scenarios
+Proven track record: Adopted by TLS 1.3, WireGuard, and OpenSSH
+Subsection 3.3 — Random Number Generation:
+All cryptographic randomness is sourced from OS-level CSPRNGs: /dev/urandom on Linux, CryptGenRandom on Windows, 
+SecRandomCopyBytes on iOS/macOS. No application-level entropy mixing is performed. Clarity does not implement its own RNG.
+--- CLARITY PAGE 5 ---
+4. Hybrid Encryption Protocol
+Clarity uses a dual-layer hybrid key exchange that combines classical elliptic-curve Diffie-Hellman with post-quantum key 
+encapsulation. This ensures security against both classical and quantum adversaries simultaneously.
+Subsection 4.1 — Session Key Establishment (step-by-step):
+Alice generates an ephemeral X25519 keypair: (ek_A_classical, EK_A_classical)1.
+Alice generates an ephemeral Kyber-1024 keypair: (ek_A_pq, EK_A_pq)2.
+Alice sends both ephemeral public keys to Bob via the relay network (encrypted under Bob's long-term identity key)3.
+Bob performs ECDH: shared_classical = X25519(ek_B_classical, EK_A_classical)4.
+Bob performs Kyber KEM encapsulation: (ciphertext_pq, shared_pq) = Kyber.Encaps(EK_A_pq)5.
+Bob sends ciphertext_pq to Alice6.
+Alice decapsulates: shared_pq = Kyber.Decaps(ek_A_pq, ciphertext_pq)7.
+Both parties derive the final session key: session_key = HKDF-SHA3-256(shared_classical || shared_pq, salt, 
+"ClaritySessionKey")
+8.
+All subsequent messages in the session are encrypted with ChaCha20-Poly1305 using session_key9.
+Subsection 4.2 — Key Derivation Details:
+The HKDF derivation uses the following parameters:       - IKM (Input Key Material): Concatenation of X25519 shared secret (32 
+bytes) and Kyber shared secret (32 bytes) = 64 bytes total       - Salt: Random 32-byte value exchanged during session initiation       
+- Info: ASCII string 'ClaritySessionKey-v1' (domain separation)       - Output length: 32 bytes (256-bit session key)
+Subsection 4.3 — Nonce Management:
+Each message uses a unique 96-bit nonce derived as: nonce = BLAKE3(session_key || message_counter || timestamp_ms). The 
+message counter is a monotonically increasing 64-bit integer. Nonce reuse is cryptographically impossible within a session. 
+Sessions are terminated and re-keyed before counter exhaustion at 2^32 messages.
+Subsection 4.4 — Packet Structure:
+Field Size Description
+Version 1 byte Protocol version (currently 0x01)
+Message Type 1 byte 0x01=message, 0x02=key exchange, 
+0x03=control
+Nonce 12 bytes Per-message nonce (BLAKE3-derived)
+Ciphertext Variable (padded to 4KB) ChaCha20-Poly1305 encrypted 
+payload
+Auth Tag 16 bytes Poly1305 authentication tag
+HMAC 32 bytes HMAC-SHA3-256 over entire packet
+--- CLARITY PAGE 6 ---
+5. Perfect Forward Secrecy
+Clarity implements a double-ratchet mechanism inspired by the Signal Protocol but extended to cover group conversations and 
+to integrate post-quantum key material into the ratchet state.
+Subsection 5.1 — Ratchet Architecture:
+The Clarity Double Ratchet consists of two interlocked ratchets:
+Diffie-Hellman Ratchet (Asymmetric): Advances on every message exchange round-trip. Each advance generates a new 
+ephemeral DH keypair and derives a new root key. This provides break-in recovery (future secrecy) — if an attacker 
+compromises the current state, they cannot decrypt future messages once the ratchet advances.
+Symmetric-Key Ratchet (Chain Key): Advances on every individual message. Each message derives a unique message key 
+from the current chain key via HKDF. The chain key is then advanced and the previous value is deleted. This provides 
+forward secrecy — compromise of the current chain key does not expose previous messages.
+Subsection 5.2 — Key Rotation Policy:
+Trigger Action Scope
+Every message sent Advance symmetric chain key; derive new 
+message key
+Per-message
+Every 100 messages Advance DH ratchet; derive new root key and 
+chain key
+Per-session
+Every 5 minutes (idle) Force DH ratchet advance Per-session
+Session end Securely delete all session keys from memory Full session
+App background (>30 min) Derive new identity prekeys; upload to key 
+server
+Per-device
+Subsection 5.3 — Key Deletion:
+Clarity uses secure memory wiping (memset_s or equivalent) to overwrite key material before deallocation. On iOS, keys are 
+stored in the Secure Enclave where possible. On Android, keys are stored in the Android Keystore with hardware-backed 
+protection. Keys are never written to disk in plaintext.
+Subsection 5.4 — Blast Radius Analysis:
+In the worst-case scenario of a full session state compromise:
+Messages before the compromise: Protected by forward secrecy (chain keys already deleted)
+The compromised message: Exposed (unavoidable)
+Messages after the next DH ratchet advance: Protected by future secrecy
+Maximum exposure window: Messages sent between compromise and next DH ratchet advance (≤100 messages or 5 
+minutes)
+--- CLARITY PAGE 7 ---
+6. Group Messaging Security
+Group messaging is the hardest problem in secure communications. Clarity solves it using a TreeKEM-based key distribution protocol that 
+provides O(log n) complexity for key operations and full forward secrecy for all group members.
+Subsection 6.1 — TreeKEM Protocol:
+Clarity's group key management is based on the IETF Messaging Layer Security (MLS) draft standard, using a binary tree structure where:
+Each leaf node represents a group member's public key
+Each internal node holds a key pair derived from its children
+The root node's key is the group encryption key
+Adding or removing a member requires updating only O(log n) nodes, not all n members
+Subsection 6.2 — Member Operations:
+Operation Key Updates Required Complexity Forward Secrecy Preserved?
+Add member Update path from new leaf to root O(log n) Yes — new member cannot 
+decrypt past messages
+Remove 
+member
+Regenerate all keys on path from removed 
+leaf to root
+O(log n) Yes — removed member 
+cannot decrypt future 
+messages
+Send message Encrypt with current root key O(1) Yes
+Receive 
+message
+Decrypt with current root key O(1) Yes
+Group key 
+rotation 
+(scheduled)
+Full tree re-key O(n) Yes
+Subsection 6.3 — Sender Authentication in Groups:
+Each group message is signed with the sender's Ed25519 identity key before encryption. Recipients verify the signature after decryption. This 
+provides:
+Message authenticity: Recipients can verify who sent each message
+Non-repudiation within the group: Senders cannot deny sending a message to group members
+Note: Deniability to external parties is preserved — the signature is only verifiable by group members who hold the sender's verified public 
+key
+Subsection 6.4 — Group Admin Operations:
+Sensitive group operations (member add/remove, group key rotation, group dissolution) require threshold authorization:
+Groups of 2–10 members: Single admin authorization
+Groups of 11–50 members: 2-of-3 admin threshold
+Groups of 51+ members: 3-of-5 admin threshold
+Threshold signatures use a Schnorr multi-signature scheme. No single admin can unilaterally modify large groups.
+Subsection 6.5 — Maximum Group Size:
+Clarity supports groups of up to 10,000 members. At this scale, key operations remain tractable: O(log 10000) ≈ 13 node updates per member 
+change. Message delivery uses a gossip protocol with epidemic broadcast for efficient distribution.
+--- CLARITY PAGE 8 ---
+7. Network Architecture
+Clarity's network layer is fully decentralized. There is no central server, no single point of failure, and no entity — including Clarity Inc. — that 
+can surveil, censor, or disrupt communications.
+Subsection 7.1 — Node Types:
+Node Type Role Trust Level Hardware 
+Requirements
+Client Node End-user device (iOS, Android, Web, 
+Desktop)
+Fully trusted (user-controlled) Any modern 
+smartphone or 
+computer
+Relay Node Routes encrypted packets between 
+clients
+Zero trust — sees only 
+encrypted onion layers
+2-core CPU, 4GB RAM, 
+100Mbps uplink
+Bootstrap Node Provides initial peer discovery for 
+new clients
+Minimal trust — provides 
+node list only
+4-core CPU, 8GB RAM, 
+1Gbps uplink
+Prekey Server Stores encrypted public prekeys for 
+offline delivery
+Zero trust — stores only 
+public keys
+4-core CPU, 16GB 
+RAM, SSD storage
+Subsection 7.2 — Message Routing Flow:
+Sender's client constructs an onion-encrypted packet with a 5-hop path selected randomly from the relay node pool1.
+Each hop is encrypted with the relay node's public key — only that node can decrypt its layer to learn the next hop2.
+The innermost layer contains the encrypted message payload, addressed to the recipient's anonymous inbox identifier3.
+The final relay node delivers the packet to the recipient's inbox without knowing the sender's identity4.
+The recipient's client polls its inbox over a separate anonymized connection, preventing correlation of delivery with receipt5.
+Subsection 7.3 — Byzantine Fault Tolerance:
+Relay nodes use a PBFT (Practical Byzantine Fault Tolerance) variant for message ordering consensus. The network tolerates up to f = ⌊ (n-
+1)/3 ⌋  malicious or faulty nodes, where n is the total number of active relay nodes. With 1,000 relay nodes, the network tolerates up to 333 
+simultaneously malicious nodes.
+Subsection 7.4 — Node Incentivization:
+Relay nodes are incentivized via the Clarity Token (CLR), a utility token distributed as follows:
+Nodes earn CLR proportional to verified bandwidth contributed
+Proof-of-bandwidth is verified by random client challenges (download test packets)
+Minimum stake of 1,000 CLR required to operate a relay node (Sybil resistance)
+Slashing: Nodes that fail availability checks or serve malformed packets lose 10% of stake
+Subsection 7.5 — Network Capacity:
+Target network specifications at launch:
+Relay nodes: 500 (bootstrap) →  5,000 (12 months post-launch)
+Message throughput: 10,000 messages/second at 500 nodes
+Latency overhead vs. direct connection: +80–200ms (onion routing cost)
+Geographic distribution: Nodes in ≥30 countries at launch
+--- CLARITY PAGE 9 ---
+8. Metadata Obfuscation
+Metadata — who communicates with whom, when, and how often — is often more valuable to adversaries than 
+message content. Clarity treats metadata as equally sensitive to content and applies multiple independent 
+obfuscation layers.
+01
+Onion Routing
+Clarity's onion routing 
+implementation:
+Minimum path length: 5 hops 
+(configurable up to 9 for high-
+security mode)
+Path selection: Random weighted 
+selection from relay node pool, 
+biased toward geographic 
+diversity
+Circuit lifetime: New circuit 
+constructed every 10 minutes or 
+1,000 messages
+Guard nodes: First hop is a 'guard 
+node' selected from a stable, 
+high-uptime subset — prevents 
+long-term traffic correlation
+Each layer encrypted with the 
+relay node's X25519 public key + 
+ChaCha20-Poly1305
+02
+Packet Size Normalization
+All packets are padded to exactly 
+4,096 bytes (4KB) before 
+transmission:
+Payloads shorter than 4KB are 
+padded with cryptographically 
+random bytes
+Payloads longer than 4KB are 
+split into multiple 4KB packets
+Padding is indistinguishable from 
+ciphertext to any observer
+This prevents traffic analysis 
+based on message length (e.g., 
+distinguishing a short 'yes' from a 
+long document)
+03
+Timing Noise Injection
+Random delays are injected at the 
+client level before packet 
+transmission:
+Delay range: 10ms – 500ms 
+(uniform random distribution)
+High-security mode: 100ms – 
+2,000ms
+Delays are applied independently 
+per packet — no correlation 
+between consecutive packets
+This defeats timing correlation 
+attacks that attempt to link 
+sender and recipient by matching 
+packet transmission and receipt 
+times
+04
+Cover Traffic
+Clarity clients generate cover traffic (dummy packets) 
+during active sessions:
+Rate: 1 dummy packet per 30 seconds during active 
+session
+Dummy packets are indistinguishable from real 
+packets to relay nodes
+This prevents traffic analysis based on silence 
+periods (e.g., detecting when a user stops 
+communicating)
+05
+Anonymous Identifiers
+Users are identified on the network by rotating 
+anonymous inbox identifiers:
+Inbox ID = BLAKE3(identity_public_key || 
+epoch_number), where epoch = 24-hour period
+Inbox IDs rotate every 24 hours — long-term tracking 
+of a user's inbox is impossible
+Users share their current inbox ID with contacts via 
+an encrypted, authenticated channel
+--- CLARITY PAGE 10 ---
+9. Zero-Knowledge Authentication
+Clarity's authentication system allows users to prove their identity to the network without revealing any secret information — 
+not even to Clarity's own infrastructure. This is achieved using a Schnorr-based zero-knowledge proof protocol.
+Subsection 9.1 — Identity Key Architecture:
+Each Clarity user has a three-tier key hierarchy:
+01
+Identity Key (IK)
+Long-term Ed25519 keypair. Never 
+leaves the device. Used to sign prekeys.
+02
+Signed Prekey (SPK)
+Medium-term X25519 keypair, rotated 
+every 30 days. Signed by IK. Uploaded to 
+prekey server.
+03
+One-Time Prekeys (OPK)
+Short-term X25519 keypairs, generated 
+in batches of 100. Used once per 
+session initiation. Uploaded to prekey 
+server.
+Subsection 9.2 — Zero-Knowledge Login Protocol:
+Client generates a random challenge nonce: c = random_256_bits()1.
+Client computes commitment: R = r·G where r is a random scalar and G is the Ed25519 base point2.
+Server sends challenge: e = BLAKE3(R || public_key || c || timestamp)3.
+Client computes response: s = r + e·private_key (mod curve_order)4.
+Client sends (R, s) to server5.
+Server verifies: s·G == R + e·public_key6.
+If verification passes, authentication succeeds — server learns nothing about private_key7.
+This is a Schnorr identification protocol. The server learns only that the client possesses the private key corresponding to the 
+registered public key. No password, no secret, and no private key material is ever transmitted.
+Subsection 9.3 — Account Recovery:
+Clarity does not store recovery codes or backup credentials on any server. Account recovery options:
+Multi-device sync: Users can register up to 5 devices; any device can re-authenticate others
+Recovery phrase: 24-word BIP-39 mnemonic derived from identity key (stored offline by user)
+Social recovery (optional): User designates 3 trusted contacts; 2-of-3 can authorize key reset
+Note: If all recovery options are lost, the account is permanently inaccessible. This is by design.
+Subsection 9.4 — Prekey Server Trust Model:
+The prekey server is explicitly untrusted:
+It stores only public keys — no private key material
+All prekeys are signed by the user's identity key — tampering is detectable
+Clients verify prekey signatures before use — a compromised prekey server cannot perform MITM attacks
+Prekey server cannot link prekey requests to specific users (requests are made over anonymized connections)
+--- CLARITY PAGE 11 ---
+10. Security Hardening
+Beyond cryptographic correctness, Clarity applies defense-in-depth hardening at every layer of the stack — client application, network protocol, 
+and infrastructure.
+Subsection 10.1 — Client Application Hardening:
+Hardening Measure Platform Implementation
+Secure Enclave key storage iOS Identity key stored in Secure Enclave; never extractable
+Android Keystore (hardware-backed) Android Keys bound to hardware security module where available
+Memory encryption All Sensitive data encrypted in memory using libsodium's secure_alloc
+Screen capture prevention iOS/Android FLAG_SECURE on Android; UIScreen.isCaptured detection on iOS
+Jailbreak/root detection iOS/Android Multi-layer detection; app refuses to run in compromised 
+environment
+Certificate pinning All TLS connections pin to Clarity's certificate chain; rejects all others
+Binary integrity verification All App binary signed and verified at launch; tampered builds rejected
+Clipboard protection All Message content never written to system clipboard without 
+explicit user action
+Subsection 10.2 — Network Protocol Hardening:
+TLS 1.3 minimum for all control-plane connections (no TLS 1.2 fallback)
+Cipher suite restricted to: TLS_CHACHA20_POLY1305_SHA256, TLS_AES_256_GCM_SHA384
+HSTS enforced with 2-year max-age on all web endpoints
+Certificate Transparency (CT) logging required for all TLS certificates
+OCSP stapling enabled; revoked certificates rejected immediately
+DNS-over-HTTPS (DoH) for all DNS resolution to prevent DNS-based surveillance
+Subsection 10.3 — Infrastructure Hardening:
+All relay nodes run on hardened Linux (grsecurity/PaX kernel patches)
+Network segmentation: relay nodes have no access to prekey server infrastructure
+Automated vulnerability scanning: daily Nessus scans on all infrastructure
+Intrusion detection: Suricata IDS on all network interfaces
+Log integrity: All infrastructure logs are cryptographically signed and stored in append-only storage
+No plaintext data at rest: all database fields encrypted with AES-256-GCM at the application layer
+Subsection 10.4 — Disappearing Messages:
+Clarity supports configurable message retention:
+Default: Messages deleted from device after 7 days
+Options: 1 hour, 24 hours, 7 days, 30 days, or never
+Deletion is cryptographic: message keys are securely wiped, rendering ciphertext permanently unrecoverable
+Deletion is enforced on all devices in a conversation simultaneously
+--- CLARITY PAGE 12 ---
+11. Post-Quantum Readiness
+The cryptographic community broadly estimates that a cryptographically relevant quantum computer (CRQC) capable of breaking 
+2048-bit RSA and 256-bit elliptic curve cryptography will exist within 10–15 years. Clarity is designed to be quantum-resistant 
+from day one, not as an afterthought.
+Subsection 11.1 — Quantum Threat Assessment:
+Algorithm Classical 
+Security
+Quantum Security (Grover/Shor) Clarity's Response
+RSA-2048 112-bit Broken by Shor's algorithm Not used in Clarity
+ECDH P-256 128-bit Broken by Shor's algorithm Replaced by Kyber-1024 (hybrid)
+X25519 128-bit Broken by Shor's algorithm Retained as hybrid fallback only
+AES-256 256-bit 128-bit (Grover halves key space) Not primary cipher; ChaCha20 used
+ChaCha20-256 256-bit 128-bit (Grover) Acceptable; 128-bit PQ security retained
+SHA3-256 256-bit 128-bit (Grover) Acceptable; 128-bit PQ security retained
+Kyber-1024 N/A (PQ 
+native)
+256-bit (no known quantum 
+attack)
+Primary KEM in Clarity
+Subsection 11.2 — NIST PQC Standardization:
+Clarity's post-quantum primitives are aligned with NIST's Post-Quantum Cryptography standardization process:
+Kyber (CRYSTALS-Kyber): Selected as NIST PQC standard (FIPS 203) for key encapsulation
+Dilithium (CRYSTALS-Dilithium): Under evaluation for future signature replacement of Ed25519
+SPHINCS+: Hash-based signature scheme; being evaluated as a conservative backup
+Falcon: Lattice-based signature scheme; under evaluation for performance-critical paths
+Subsection 11.3 — Migration Path to Pure Post-Quantum:
+Phase 1 (Current — v1.0): Hybrid X25519 + Kyber-1024 key exchange. Classical security maintained; PQ resistance added.1.
+Phase 2 (v1.5 — Q2 2026): Replace Ed25519 identity signatures with Dilithium-3. Hybrid signature scheme during transition.2.
+Phase 3 (v2.0 — Q4 2026): Pure post-quantum mode available as opt-in. All classical primitives removed from PQ mode.3.
+Phase 4 (v3.0 — 2027+): Pure PQ mode becomes default. Classical hybrid mode deprecated.4.
+Subsection 11.4 — Harvest Now, Decrypt Later:
+A critical threat is 'harvest now, decrypt later' — adversaries recording encrypted traffic today to decrypt once quantum computers 
+are available. Clarity's hybrid approach ensures that even traffic recorded today cannot be decrypted by a future quantum 
+computer, because the Kyber-1024 layer provides quantum-resistant confidentiality from the first message.
+--- CLARITY PAGE 13 ---
+12. Audit & Verification
+Security claims without independent verification are worthless. Clarity's entire cryptographic core is open-source and has undergone rigorous third-party 
+audits. Reproducible builds allow anyone to verify that the distributed binaries match the published source code.
+Subsection 12.1 — Third-Party Security Audits:
+Auditor Scope Date Status Report
+Trail of Bits Cryptographic core (libclarity-
+crypto)
+Q4 2025 Completed Public — clarity.app/audits/tob-2025
+NCC Group Network protocol & relay node 
+software
+Q1 2026 Completed Public — clarity.app/audits/ncc-2026
+Cure53 iOS & Android client applications Q1 2026 Completed Public — clarity.app/audits/cure53-2026
+Quarkslab Post-quantum implementation 
+(Kyber-1024)
+Q2 2026 Completed Public — clarity.app/audits/quarkslab-
+2026
+Independent (TBD) Full-stack re-audit Q4 2026 Scheduled Pending
+Subsection 12.2 — Audit Findings Summary:
+Trail of Bits (Q4 2025) — 23 findings total:       
+Critical: 0
+High: 1 (nonce derivation edge case — fixed in v0.9.2)
+Medium: 4 (all fixed before public release)
+Low/Informational: 18 (all addressed)
+NCC Group (Q1 2026) — 17 findings total:       
+Critical: 0
+High: 0
+Medium: 3 (all fixed in v1.0-rc2)
+Low/Informational: 14 (all addressed)
+Subsection 12.3 — Reproducible Builds:
+Clarity uses reproducible builds to allow independent verification:
+Source code is published on GitHub (github.com/clarity-messenger/clarity)1.
+Build environment is fully specified via Nix flakes (deterministic dependency resolution)2.
+Build instructions are published; anyone can reproduce the exact binary3.
+Binary hashes are published on clarity.app/releases and signed with Clarity's release key4.
+F-Droid (Android) and AltStore (iOS) provide independent binary verification5.
+Subsection 12.4 — Bug Bounty Program:
+Severity Payout Range Examples
+Critical $25,000 – $50,000 Remote code execution, key extraction, full E2E encryption break
+High $10,000 – $25,000 Authentication bypass, metadata deanonymization
+Medium $2,500 – $10,000 Partial information leakage, DoS on relay network
+Low $500 – $2,500 Minor information disclosure, non-critical bugs
+Informational $100 – $500 Best-practice violations, documentation errors
+Bug bounty reports: security@clarity.app (PGP key published on clarity.app/security)
+--- CLARITY PAGE 14 ---
+13. Deployment Roadmap
+Clarity's deployment is structured in four phases, each gating on security milestones rather than arbitrary calendar dates. A phase does not begin until all 
+security requirements of the previous phase are verified.
+Subsection 13.1 — Phase Timeline:
+Phase Timeline Milestone User Count Key Security Gate
+Phase 0 — Internal 
+Alpha
+Q3 2025 Core cryptographic library complete; internal 
+team testing
+~50 (internal) Trail of Bits audit initiated
+Phase 1 — Closed Beta Q4 2025 Invite-only beta with security researchers 
+and red team
+10,000 Trail of Bits audit 
+complete; all Critical/High 
+findings resolved
+Phase 2 — Public 
+Launch
+Q1 2026 iOS, Android, Web, Desktop 
+(macOS/Linux/Windows)
+Unlimited NCC Group + Cure53 
+audits complete; 
+reproducible builds 
+verified
+Phase 3 — Enterprise Q2 2026 Self-hosted relay node deployment for 
+enterprise customers
+Enterprise 
+accounts
+Quarkslab PQ audit 
+complete; enterprise 
+security review passed
+Phase 4 — PQ 
+Migration
+Q4 2026 Pure post-quantum mode opt-in; Dilithium 
+signatures
+All users v2.0 full-stack audit 
+complete
+Subsection 13.2 — Platform Support Matrix:
+Platform Phase 2 (Launch) Phase 3 Notes
+iOS 16+ ✓  Full support ✓ Secure Enclave integration
+Android 10+ ✓  Full support ✓ Hardware Keystore integration
+Web (Chrome/Firefox/Safari) ✓  Full support ✓ WebCrypto API; no extension 
+required
+macOS 12+ ✓  Full support ✓ Native app; Keychain integration
+Windows 10+ ✓  Full support ✓ Native app; Windows Hello 
+integration
+Linux ✓  Full support ✓ AppImage + Flatpak distribution
+Self-hosted relay node   ✓ Docker + Kubernetes 
+deployment
+Subsection 13.3 — Enterprise Deployment:
+Enterprise self-hosted deployment allows organizations to operate their own relay nodes within their network perimeter:
+Relay node software distributed as Docker container (docker.io/clarity/relay-node)
+Kubernetes Helm chart provided for orchestrated deployment
+Enterprise nodes can be restricted to serve only organization members
+Full audit logging available for compliance (SOC 2, ISO 27001)
+On-premise key management integration (HashiCorp Vault, AWS KMS, Azure Key Vault)
+Subsection 13.4 — SLA & Availability:
+Target uptime: 99.9% for prekey server infrastructure
+Message delivery guarantee: Best-effort; messages queued for up to 30 days for offline recipients
+No SLA on relay network (decentralized; individual node uptime not guaranteed)
+Status page: status.clarity.app
+--- CLARITY PAGE 15 ---
+14. Competitive Analysis
+This section provides a technical comparison of Clarity Messenger against the leading secure messaging applications: Signal, WhatsApp, Telegram, and Wire.
+Subsection 14.1 — Feature Comparison Matrix:
+Security Feature Clarity Signal WhatsApp Telegram Wire
+End-to-end encryption (messages) ✓ ✓ ✓   (opt-in) ✓
+End-to-end encryption (metadata) ✓        
+Perfect Forward Secrecy ✓  (all msgs) ✓  (1:1 only) ✓  (1:1 only)   ✓  (1:1 only)
+Post-quantum resistance ✓  (Kyber-1024)        
+Decentralized network ✓        
+Zero-knowledge authentication ✓        
+Onion routing ✓        
+Open-source (full stack) ✓ ✓  (partial)     ✓  (partial)
+Reproducible builds ✓ ✓      
+No phone number required ✓       ✓
+Group PFS ✓  (TreeKEM)        
+Independent audit (recent) ✓  (2025–2026) ✓  (2016)     ✓  (2017)
+Subsection 14.2 — Signal's Specific Weaknesses:
+Signal is the gold standard for consumer secure messaging, but has documented limitations:
+Metadata leakage: Signal's servers know who you communicate with, when, and how often. This is confirmed by Signal's own privacy policy and court-ordered 
+disclosures.
+1.
+Centralized infrastructure: Signal operates on AWS. A single legal order or infrastructure failure can disrupt service globally.2.
+Phone number requirement: Signal requires a phone number for registration, linking your identity to a telecom provider.3.
+No group PFS: Signal's Sender Keys protocol for groups does not provide per-message forward secrecy — a compromised group key exposes all messages 
+encrypted under it.
+4.
+No post-quantum resistance: Signal uses X25519 for key exchange, which is vulnerable to quantum computers.5.
+Subsection 14.3 — Clarity's Unique Differentiators:
+Three capabilities that no other messaging application currently offers:
+Full metadata encryption
+Clarity is the only application that encrypts not 
+just message content but all metadata — sender, 
+recipient, timing, and frequency — using onion 
+routing and anonymous identifiers.
+Post-quantum hybrid encryption
+Clarity is the only consumer messaging 
+application with Kyber-1024 post-quantum key 
+encapsulation deployed in production.
+Group Perfect Forward Secrecy
+Clarity's TreeKEM implementation provides per-
+message forward secrecy in group 
+conversations — a capability no other 
+application offers at scale.
+Subsection 14.4 — Performance Trade-offs:
+Metric Clarity Signal Notes
+Message latency (1:1) +80–200ms ~50ms Onion routing overhead
+Message latency (group) +100–250ms ~75ms TreeKEM overhead for large groups
+Key exchange overhead +2ms ~0.5ms Kyber-1024 encapsulation cost
+Bandwidth per message 4KB (fixed) Variable Padding for traffic analysis 
+resistance
+Battery impact ~15% higher Baseline Cover traffic + onion routing
+These trade-offs are intentional and represent the cost of providing security guarantees that Signal does not offer. For users who require MI6-grade security, these 
+trade-offs are acceptable.
+--- CLARITY PAGE 16 ---
+Document Information
+Version Date Author Changes
+v0.1 Q3 2025 Clarity Security Team Initial draft
+v0.5 Q4 2025 Clarity Security Team Added PQ section; updated audit findings
+v0.9 Q1 2026 Clarity Security Team Post-launch update; NCC Group findings 
+incorporated
+v1.0 August 
+2026
+Clarity Security Team Final release; all audits complete
+References
+CRYSTALS-Kyber: NIST FIPS 203 (2024) — https://csrc.nist.gov/pubs/fips/203/final1.
+Signal Protocol Specification — https://signal.org/docs/2.
+IETF MLS (Messaging Layer Security) — RFC 9420 (2023)3.
+Schnorr Identification Protocol — Schnorr, C.P. (1991). "Efficient Signature Generation by Smart Cards"4.
+ChaCha20-Poly1305 — RFC 8439 (2018)5.
+HKDF — RFC 5869 (2010)6.
+Argon2 — RFC 9106 (2021)7.
+Trail of Bits Audit Report — clarity.app/audits/tob-20258.
+NCC Group Audit Report — clarity.app/audits/ncc-20269.
+Practical Byzantine Fault Tolerance — Castro & Liskov (1999)10.
+Contact
+Security issues: security@clarity.app
+Technical questions: engineering@clarity.app
+Press: press@clarity.app
+Website: clarity.app
+This document contains confidential and proprietary information of Clarity Messenger Inc. Distribution is restricted to authorized 
+technical personnel. The cryptographic specifications described herein are subject to change. Clarity Messenger Inc. makes no warranty, 
+express or implied, regarding the completeness or accuracy of this document.

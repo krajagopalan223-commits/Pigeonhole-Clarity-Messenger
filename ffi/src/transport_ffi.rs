@@ -9,7 +9,11 @@
 use std::os::raw::c_char;
 use std::ptr;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+
 use clarity_core::identity::Account;
+use clarity_core::PreKeyBundle;
 use clarity_net::RelayTransport;
 
 use crate::{as_slice, encode_byte_list, ClarityBuffer};
@@ -93,6 +97,61 @@ pub unsafe extern "C" fn clarity_relay_publish_account(
     base.one_time_prekey_id = None;
     let one_time = account.one_time_prekey_publics();
     match transport.publish(&base, &one_time) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Publish a base bundle + one-time prekeys from raw bytes (no Account handle),
+/// so a background isolate that owns only the transport can publish. `bundle` is
+/// an encoded [`PreKeyBundle`]; `one_time_json` is the JSON produced by
+/// `clarity_account_one_time_publics` (`[{"id":u32,"public":"<base64>"}]`).
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `t` valid; both byte regions readable.
+#[no_mangle]
+pub unsafe extern "C" fn clarity_relay_publish(
+    t: *const RelayTransport,
+    bundle: *const u8,
+    bundle_len: usize,
+    one_time_json: *const u8,
+    one_time_len: usize,
+) -> i32 {
+    let transport = match t.as_ref() {
+        Some(t) => t,
+        None => return -1,
+    };
+    let bundle = match PreKeyBundle::decode(as_slice(bundle, bundle_len)) {
+        Ok(b) => b,
+        Err(_) => return -1,
+    };
+    let parsed: Vec<serde_json::Value> =
+        match serde_json::from_slice(as_slice(one_time_json, one_time_len)) {
+            Ok(v) => v,
+            Err(_) => return -1,
+        };
+    let mut one_time = Vec::with_capacity(parsed.len());
+    for entry in parsed {
+        let id = match entry.get("id").and_then(|v| v.as_u64()) {
+            Some(id) => id as u32,
+            None => return -1,
+        };
+        let public = match entry.get("public").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return -1,
+        };
+        let bytes = match STANDARD.decode(public) {
+            Ok(b) => b,
+            Err(_) => return -1,
+        };
+        let key: [u8; 32] = match bytes.try_into() {
+            Ok(k) => k,
+            Err(_) => return -1,
+        };
+        one_time.push((id, key));
+    }
+    match transport.publish(&bundle, &one_time) {
         Ok(()) => 0,
         Err(_) => -1,
     }

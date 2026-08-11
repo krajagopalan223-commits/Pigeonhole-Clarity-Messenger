@@ -215,6 +215,27 @@ fn relay_transport_over_ffi() {
             clarity_session_respond(bob, messages[0].as_ptr(), messages[0].len(), &mut out);
         assert_eq!(take_buffer(out).unwrap(), b"via ffi relay");
 
+        // The bytes-based publish (used by a worker isolate with no Account
+        // handle) works too: publish a second account from its raw bytes.
+        let carol = clarity_account_generate();
+        let carol_bundle = take_buffer(clarity_account_bundle_base(carol)).unwrap();
+        let carol_otp = take_buffer(clarity_account_one_time_publics(carol)).unwrap();
+        assert_eq!(
+            clarity_relay_publish(
+                transport,
+                carol_bundle.as_ptr(),
+                carol_bundle.len(),
+                carol_otp.as_ptr(),
+                carol_otp.len(),
+            ),
+            0
+        );
+        let mut carol_id = [0u8; 32];
+        clarity_account_identity_public(carol, carol_id.as_mut_ptr());
+        let fetched = take_buffer(clarity_relay_fetch_bundle(transport, carol_id.as_ptr())).unwrap();
+        assert!(!fetched.is_empty());
+        clarity_account_free(carol);
+
         // Unknown identity fetch returns an empty (not null) buffer.
         let unknown = [9u8; 32];
         let none = clarity_relay_fetch_bundle(transport, unknown.as_ptr());

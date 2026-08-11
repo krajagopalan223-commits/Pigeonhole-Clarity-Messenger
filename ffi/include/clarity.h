@@ -80,6 +80,11 @@ ClarityRelayTransport *clarity_relay_transport_direct(const char *url);
 ClarityRelayTransport *clarity_relay_transport_tor(const char *url, const char *socks_addr);
 void clarity_relay_transport_free(ClarityRelayTransport *t);
 int32_t clarity_relay_publish_account(const ClarityRelayTransport *t, const ClarityAccount *acct);
+/* bytes-based publish (no Account handle) for a worker isolate; one_time_json is
+ * the output of clarity_account_one_time_publics */
+int32_t clarity_relay_publish(const ClarityRelayTransport *t,
+                              const uint8_t *bundle, size_t bundle_len,
+                              const uint8_t *one_time_json, size_t one_time_len);
 /* empty buffer (ptr!=NULL,len==0) => no bundle; NULL ptr => transport error */
 ClarityBuffer clarity_relay_fetch_bundle(const ClarityRelayTransport *t, const uint8_t *identity /* 32 */);
 int32_t clarity_relay_send(const ClarityRelayTransport *t, const uint8_t *recipient /* 32 */,
