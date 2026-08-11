@@ -42,8 +42,10 @@ pub fn serve_on(server: Server, store: Arc<RelayStore>) {
 fn handle(store: &RelayStore, mut request: Request) {
     let method = request.method().clone();
     let url = request.url().to_string();
-    let path = url.split('?').next().unwrap_or("").to_string();
-    let query = url.splitn(2, '?').nth(1).unwrap_or("").to_string();
+    let (path, query) = match url.split_once('?') {
+        Some((p, q)) => (p.to_string(), q.to_string()),
+        None => (url.clone(), String::new()),
+    };
 
     let result = match (&method, path.as_str()) {
         (Method::Get, "/health") => respond_text(request, 200, "ok"),

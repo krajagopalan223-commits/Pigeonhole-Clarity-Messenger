@@ -56,7 +56,7 @@ impl ClarityBuffer {
 #[no_mangle]
 pub unsafe extern "C" fn clarity_buffer_free(buf: ClarityBuffer) {
     if !buf.ptr.is_null() {
-        drop(Box::from_raw(std::slice::from_raw_parts_mut(buf.ptr, buf.len)));
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(buf.ptr, buf.len)));
     }
 }
 
