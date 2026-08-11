@@ -16,10 +16,13 @@ the source specification.
 
 | Crate / dir | What it is | Status |
 |-------------|-----------|--------|
-| [`core/`](core) | `clarity-core`: identity, PQXDH handshake, Double Ratchet, safety numbers | ✅ built, 14 tests |
+| [`core/`](core) | `clarity-core`: identity, PQXDH handshake, Double Ratchet, safety numbers, TEE enclave boundary | ✅ built, 17 tests |
 | [`ffi/`](ffi) | `clarity-ffi`: C ABI over the core for `dart:ffi` | ✅ built, 4 tests |
 | [`relay/`](relay) | `clarity-relay`: thin zero-plaintext store-and-forward server | ✅ built, 3 tests |
+| [`net/`](net) | `clarity-net`: relay transport with first-class Tor (SOCKS5/onion) support | ✅ built, 3 tests |
 | [`app/`](app) | Flutter app for iOS/Android/Linux, one codebase | ✅ code complete; runner folders via `flutter create` |
+
+Hardening docs: [`SECURITY.md`](SECURITY.md) · [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`TEE.md`](TEE.md) (enclave/secure-hardware) · [`TOR.md`](TOR.md) (metadata-protecting transport).
 
 ### Security properties (the ones we actually claim)
 
@@ -80,13 +83,22 @@ tool/    build_rust.sh  — build the native lib for a platform
 
 ## Status & roadmap
 
-This is a **v0.1 foundation**, not a finished product. Honest next steps, in
-priority order:
+This is a **v0.1 foundation**, not a finished product.
 
-1. Persist Double Ratchet session state (survive app restarts).
-2. Sealed-sender + Tor transport to shrink the metadata the relay sees.
-3. Group messaging via an audited **MLS** (RFC 9420) implementation.
-4. Independent security review before any real-world use.
+Done since the first cut:
+- ✅ Serializable session state (conversations survive app restarts).
+- ✅ TEE enclave boundary — secrets cross into the untrusted host only as sealed
+  blobs; maps to SGX / Secure Enclave / StrongBox (see [`TEE.md`](TEE.md)).
+- ✅ Tor transport (`clarity-net`) hiding the client IP from relay and network
+  (see [`TOR.md`](TOR.md)).
+
+Honest next steps, in priority order:
+
+1. Wire `clarity-net` (Tor) + session persistence into the Flutter app via FFI.
+2. Bind the enclave sealing key to real secure hardware per platform (TEE Level 1).
+3. Rotating-inbox-ID / sealed-sender to shrink the contact graph the relay sees.
+4. Group messaging via an audited **MLS** (RFC 9420) implementation.
+5. Independent security review before any real-world use.
 
 > ⚠️ **Not yet audited.** Do not rely on this to protect anyone at risk until it
 > has had an independent security review.

@@ -1,0 +1,20 @@
+[package]
+name = "clarity-net"
+description = "Relay transport for Clarity, with first-class Tor (SOCKS5 / onion) support."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "clarity_net"
+
+[dependencies]
+clarity-core = { path = "../core" }
+clarity-relay = { path = "../relay" }
+ureq = { version = "2", features = ["json", "socks-proxy"] }
+serde_json = { workspace = true }
+base64 = "0.22"
+
+[dev-dependencies]
+clarity-relay = { path = "../relay" }
+tiny_http = "0.12"
