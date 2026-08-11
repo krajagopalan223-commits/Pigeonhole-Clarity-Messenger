@@ -3,11 +3,13 @@
 // This file mirrors the C header exactly. Nothing here is "safe" — allocation,
 // freeing, and pointer lifetime are the caller's responsibility. The ergonomic,
 // memory-safe API lives in `clarity.dart`, which is what app code should use.
+//
+// The function typedefs are private on purpose — callers interact with the
+// resolved fields, never the typedefs — so the lint below is expected.
+// ignore_for_file: library_private_types_in_public_api
 
 import 'dart:ffi';
 import 'dart:io';
-
-import 'package:ffi/ffi.dart';
 
 /// Opaque handles.
 final class ClarityAccount extends Opaque {}
@@ -110,64 +112,62 @@ typedef _MeshBuf = ClarityBuffer Function(Pointer<MeshNode>);
 /// Resolved bindings to the shared clarity-core library. Cheap to construct, so
 /// each isolate that needs FFI opens its own (see `clarity.dart`).
 class ClarityBindings {
-  ClarityBindings(this._lib)
-      : bufferFree = _lib.lookupFunction<_BufferFreeNative, _BufferFree>('clarity_buffer_free'),
-        stringFree = _lib.lookupFunction<_StringFreeNative, _StringFree>('clarity_string_free'),
+  ClarityBindings(DynamicLibrary lib)
+      : bufferFree = lib.lookupFunction<_BufferFreeNative, _BufferFree>('clarity_buffer_free'),
+        stringFree = lib.lookupFunction<_StringFreeNative, _StringFree>('clarity_string_free'),
         accountGenerate =
-            _lib.lookupFunction<_AccountGenNative, _AccountGen>('clarity_account_generate'),
+            lib.lookupFunction<_AccountGenNative, _AccountGen>('clarity_account_generate'),
         accountFree =
-            _lib.lookupFunction<_AccountFreeNative, _AccountFree>('clarity_account_free'),
+            lib.lookupFunction<_AccountFreeNative, _AccountFree>('clarity_account_free'),
         accountSerialize =
-            _lib.lookupFunction<_AccountBufNative, _AccountBuf>('clarity_account_serialize'),
+            lib.lookupFunction<_AccountBufNative, _AccountBuf>('clarity_account_serialize'),
         accountDeserialize =
-            _lib.lookupFunction<_AccountDeserNative, _AccountDeser>('clarity_account_deserialize'),
-        identityPublic = _lib.lookupFunction<_IdentityPubNative, _IdentityPub>(
+            lib.lookupFunction<_AccountDeserNative, _AccountDeser>('clarity_account_deserialize'),
+        identityPublic = lib.lookupFunction<_IdentityPubNative, _IdentityPub>(
             'clarity_account_identity_public'),
         bundleBase =
-            _lib.lookupFunction<_AccountBufNative, _AccountBuf>('clarity_account_bundle_base'),
-        oneTimePublics = _lib.lookupFunction<_AccountBufNative, _AccountBuf>(
+            lib.lookupFunction<_AccountBufNative, _AccountBuf>('clarity_account_bundle_base'),
+        oneTimePublics = lib.lookupFunction<_AccountBufNative, _AccountBuf>(
             'clarity_account_one_time_publics'),
         sessionInitiate =
-            _lib.lookupFunction<_SessionInitNative, _SessionInit>('clarity_session_initiate'),
+            lib.lookupFunction<_SessionInitNative, _SessionInit>('clarity_session_initiate'),
         sessionRespond =
-            _lib.lookupFunction<_SessionRespondNative, _SessionRespond>('clarity_session_respond'),
+            lib.lookupFunction<_SessionRespondNative, _SessionRespond>('clarity_session_respond'),
         sessionEncrypt =
-            _lib.lookupFunction<_SessionCryptNative, _SessionCrypt>('clarity_session_encrypt'),
+            lib.lookupFunction<_SessionCryptNative, _SessionCrypt>('clarity_session_encrypt'),
         sessionDecrypt =
-            _lib.lookupFunction<_SessionCryptNative, _SessionCrypt>('clarity_session_decrypt'),
+            lib.lookupFunction<_SessionCryptNative, _SessionCrypt>('clarity_session_decrypt'),
         sessionSerialize =
-            _lib.lookupFunction<_SessionSerNative, _SessionSer>('clarity_session_serialize'),
+            lib.lookupFunction<_SessionSerNative, _SessionSer>('clarity_session_serialize'),
         sessionDeserialize =
-            _lib.lookupFunction<_SessionDeserNative, _SessionDeser>('clarity_session_deserialize'),
+            lib.lookupFunction<_SessionDeserNative, _SessionDeser>('clarity_session_deserialize'),
         sessionFree =
-            _lib.lookupFunction<_SessionFreeNative, _SessionFree>('clarity_session_free'),
+            lib.lookupFunction<_SessionFreeNative, _SessionFree>('clarity_session_free'),
         safetyNumber =
-            _lib.lookupFunction<_SafetyNumberNative, _SafetyNumber>('clarity_safety_number'),
+            lib.lookupFunction<_SafetyNumberNative, _SafetyNumber>('clarity_safety_number'),
         relayDirect =
-            _lib.lookupFunction<_RelayDirectNative, _RelayDirect>('clarity_relay_transport_direct'),
+            lib.lookupFunction<_RelayDirectNative, _RelayDirect>('clarity_relay_transport_direct'),
         relayTor =
-            _lib.lookupFunction<_RelayTorNative, _RelayTor>('clarity_relay_transport_tor'),
+            lib.lookupFunction<_RelayTorNative, _RelayTor>('clarity_relay_transport_tor'),
         relayFree =
-            _lib.lookupFunction<_RelayFreeNative, _RelayFree>('clarity_relay_transport_free'),
-        relayPublish = _lib
+            lib.lookupFunction<_RelayFreeNative, _RelayFree>('clarity_relay_transport_free'),
+        relayPublish = lib
             .lookupFunction<_RelayPublishNative, _RelayPublish>('clarity_relay_publish_account'),
-        relayPublishBytes = _lib.lookupFunction<_RelayPublishBytesNative, _RelayPublishBytes>(
+        relayPublishBytes = lib.lookupFunction<_RelayPublishBytesNative, _RelayPublishBytes>(
             'clarity_relay_publish'),
         relayFetch =
-            _lib.lookupFunction<_RelayFetchNative, _RelayFetch>('clarity_relay_fetch_bundle'),
-        relaySend = _lib.lookupFunction<_RelaySendNative, _RelaySend>('clarity_relay_send'),
-        relayPoll = _lib.lookupFunction<_RelayPollNative, _RelayPoll>('clarity_relay_poll'),
-        meshNew = _lib.lookupFunction<_MeshNewNative, _MeshNew>('clarity_mesh_node_new'),
-        meshFree = _lib.lookupFunction<_MeshFreeNative, _MeshFree>('clarity_mesh_node_free'),
+            lib.lookupFunction<_RelayFetchNative, _RelayFetch>('clarity_relay_fetch_bundle'),
+        relaySend = lib.lookupFunction<_RelaySendNative, _RelaySend>('clarity_relay_send'),
+        relayPoll = lib.lookupFunction<_RelayPollNative, _RelayPoll>('clarity_relay_poll'),
+        meshNew = lib.lookupFunction<_MeshNewNative, _MeshNew>('clarity_mesh_node_new'),
+        meshFree = lib.lookupFunction<_MeshFreeNative, _MeshFree>('clarity_mesh_node_free'),
         meshOriginate =
-            _lib.lookupFunction<_MeshOriginateNative, _MeshOriginate>('clarity_mesh_originate'),
-        meshIngest = _lib.lookupFunction<_MeshIngestNative, _MeshIngest>('clarity_mesh_ingest'),
-        meshPendingBroadcast = _lib
+            lib.lookupFunction<_MeshOriginateNative, _MeshOriginate>('clarity_mesh_originate'),
+        meshIngest = lib.lookupFunction<_MeshIngestNative, _MeshIngest>('clarity_mesh_ingest'),
+        meshPendingBroadcast = lib
             .lookupFunction<_MeshBufNative, _MeshBuf>('clarity_mesh_pending_broadcast'),
         meshTakeInbox =
-            _lib.lookupFunction<_MeshBufNative, _MeshBuf>('clarity_mesh_take_inbox');
-
-  final DynamicLibrary _lib;
+            lib.lookupFunction<_MeshBufNative, _MeshBuf>('clarity_mesh_take_inbox');
 
   final _BufferFree bufferFree;
   final _StringFree stringFree;

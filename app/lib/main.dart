@@ -14,7 +14,7 @@ const _relayUrl = String.fromEnvironment('CLARITY_RELAY', defaultValue: 'http://
 const _useTor = bool.fromEnvironment('CLARITY_TOR', defaultValue: false);
 const _torSocks = String.fromEnvironment('CLARITY_SOCKS', defaultValue: '127.0.0.1:9050');
 
-TransportConfig _initialConfig() => TransportConfig(
+TransportConfig _initialConfig() => const TransportConfig(
       mode: _useTor ? TransportMode.relayTor : TransportMode.relayDirect,
       relayUrl: _relayUrl,
       torSocks: _torSocks,
