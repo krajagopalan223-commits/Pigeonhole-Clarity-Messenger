@@ -1,0 +1,9 @@
+[package]
+name = "clarity-relay"
+description = "Thin store-and-forward relay for Clarity Messenger."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clarity-core = { path = "../core" }

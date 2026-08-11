@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "ffi",
+    "relay",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/krajagopalan223-commits/Pigeonhole-Clarity-Messenger"
+
+[workspace.dependencies]
+# Crypto primitives (RustCrypto + dalek). All pinned to a single rand_core (0.6)
+# so one OS CSPRNG type flows through every primitive with no trait-version clashes.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+ml-kem = "0.2"
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+rand_core = { version = "0.6", features = ["getrandom"] }
+getrandom = "0.2"
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+
+# Serialization / errors
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+thiserror = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

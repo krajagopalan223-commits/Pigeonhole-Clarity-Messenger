@@ -1,0 +1,31 @@
+# Rust
+/target
+**/target
+Cargo.lock.orig
+
+# Flutter / Dart
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/.pub-cache/
+app/.pub/
+app/ios/Pods/
+app/ios/.symlinks/
+app/ios/Flutter/ephemeral/
+app/android/.gradle/
+app/android/local.properties
+app/linux/flutter/ephemeral/
+app/**/GeneratedPluginRegistrant.*
+
+# Native build artifacts copied into the app
+app/rust/target/
+app/**/*.so
+app/**/*.a
+app/**/*.dylib
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

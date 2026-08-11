@@ -1,0 +1,13 @@
+[package]
+name = "clarity-ffi"
+description = "C ABI over clarity-core for the Flutter app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "clarity_ffi"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+clarity-core = { path = "../core" }
