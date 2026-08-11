@@ -11,5 +11,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 clarity-core = { path = "../core" }
+clarity-net = { path = "../net" }
+clarity-mesh = { path = "../mesh" }
 serde_json = { workspace = true }
 base64 = "0.22"
+
+[dev-dependencies]
+clarity-relay = { path = "../relay" }
+tiny_http = "0.12"

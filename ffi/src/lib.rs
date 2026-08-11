@@ -33,7 +33,7 @@ pub struct ClarityBuffer {
 }
 
 impl ClarityBuffer {
-    fn from_vec(v: Vec<u8>) -> ClarityBuffer {
+    pub(crate) fn from_vec(v: Vec<u8>) -> ClarityBuffer {
         let mut boxed = v.into_boxed_slice();
         let ptr = boxed.as_mut_ptr();
         let len = boxed.len();
@@ -41,12 +41,25 @@ impl ClarityBuffer {
         ClarityBuffer { ptr, len }
     }
 
-    fn null() -> ClarityBuffer {
+    pub(crate) fn null() -> ClarityBuffer {
         ClarityBuffer {
             ptr: ptr::null_mut(),
             len: 0,
         }
     }
+}
+
+/// Encode a list of byte buffers as `[u32 count]( [u32 len][bytes] )*` (all
+/// little-endian). Used to return multiple messages/frames across the FFI in a
+/// single buffer the Dart side can split without a serialization library.
+pub(crate) fn encode_byte_list(items: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(items.len() as u32).to_le_bytes());
+    for item in items {
+        out.extend_from_slice(&(item.len() as u32).to_le_bytes());
+        out.extend_from_slice(item);
+    }
+    out
 }
 
 /// Free a buffer returned by any function in this library.
@@ -71,7 +84,7 @@ pub unsafe extern "C" fn clarity_string_free(s: *mut c_char) {
     }
 }
 
-unsafe fn as_slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
+pub(crate) unsafe fn as_slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
     if ptr.is_null() {
         &[]
     } else {
@@ -298,6 +311,32 @@ pub unsafe extern "C" fn clarity_session_free(sess: *mut Session) {
     }
 }
 
+/// Serialize a session's full state (ratchet + associated data) so a
+/// conversation can survive an app restart. The result is SECRET — store it only
+/// under OS secure storage (or seal it via the enclave). Null buffer on error.
+///
+/// # Safety
+/// `sess` must be a valid session handle.
+#[no_mangle]
+pub unsafe extern "C" fn clarity_session_serialize(sess: *const Session) -> ClarityBuffer {
+    match sess.as_ref() {
+        Some(s) => ClarityBuffer::from_vec(s.serialize()),
+        None => ClarityBuffer::null(),
+    }
+}
+
+/// Restore a session from [`clarity_session_serialize`] output. Null on error.
+///
+/// # Safety
+/// `ptr`/`len` must describe a readable region.
+#[no_mangle]
+pub unsafe extern "C" fn clarity_session_deserialize(ptr: *const u8, len: usize) -> *mut Session {
+    match Session::deserialize(as_slice(ptr, len)) {
+        Ok(s) => Box::into_raw(Box::new(s)),
+        Err(_) => ptr::null_mut(),
+    }
+}
+
 // --- Safety numbers --------------------------------------------------------
 
 /// Compute the human-comparable safety number for two 32-byte identity keys.
@@ -320,6 +359,9 @@ pub unsafe extern "C" fn clarity_safety_number(id_a: *const u8, id_b: *const u8)
         Err(_) => ptr::null_mut(),
     }
 }
+
+pub mod mesh_ffi;
+pub mod transport_ffi;
 
 #[cfg(test)]
 mod tests;

@@ -144,7 +144,11 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "clarity-core",
+ "clarity-mesh",
+ "clarity-net",
+ "clarity-relay",
  "serde_json",
+ "tiny_http",
 ]
 
 [[package]]

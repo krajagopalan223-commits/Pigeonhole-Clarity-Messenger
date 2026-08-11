@@ -25,6 +25,8 @@ extern "C" {
 
 typedef struct ClarityAccount ClarityAccount;
 typedef struct ClaritySession ClaritySession;
+typedef struct RelayTransport ClarityRelayTransport;
+typedef struct MeshNode ClarityMeshNode;
 
 typedef struct ClarityBuffer {
   uint8_t *ptr; /* NULL on error */
@@ -62,8 +64,40 @@ ClarityBuffer clarity_session_decrypt(ClaritySession *sess,
                                       size_t msg_len);
 void clarity_session_free(ClaritySession *sess);
 
+/* Session persistence (survive app restart; store SEALED / in secure storage) */
+ClarityBuffer clarity_session_serialize(const ClaritySession *sess);
+ClaritySession *clarity_session_deserialize(const uint8_t *ptr, size_t len);
+
 /* Safety numbers */
 char *clarity_safety_number(const uint8_t *id_a /* 32 */, const uint8_t *id_b /* 32 */);
+
+/*
+ * Relay transport (direct or via Tor). All calls BLOCK — invoke from a
+ * background thread/isolate. Multi-item results use the list encoding:
+ *   [uint32 count]( [uint32 len][bytes] )*   (all little-endian)
+ */
+ClarityRelayTransport *clarity_relay_transport_direct(const char *url);
+ClarityRelayTransport *clarity_relay_transport_tor(const char *url, const char *socks_addr);
+void clarity_relay_transport_free(ClarityRelayTransport *t);
+int32_t clarity_relay_publish_account(const ClarityRelayTransport *t, const ClarityAccount *acct);
+/* empty buffer (ptr!=NULL,len==0) => no bundle; NULL ptr => transport error */
+ClarityBuffer clarity_relay_fetch_bundle(const ClarityRelayTransport *t, const uint8_t *identity /* 32 */);
+int32_t clarity_relay_send(const ClarityRelayTransport *t, const uint8_t *recipient /* 32 */,
+                           const uint8_t *msg, size_t msg_len);
+ClarityBuffer clarity_relay_poll(const ClarityRelayTransport *t, const uint8_t *recipient /* 32 */);
+
+/*
+ * Bluetooth mesh node. The Rust side owns routing; the app owns the radio.
+ * Results use the same list encoding as above.
+ */
+ClarityMeshNode *clarity_mesh_node_new(const uint8_t *me /* 32 */);
+void clarity_mesh_node_free(ClarityMeshNode *node);
+/* returns the frame bytes to broadcast now */
+ClarityBuffer clarity_mesh_originate(ClarityMeshNode *node, const uint8_t *recipient /* 32 */,
+                                     const uint8_t *payload, size_t payload_len);
+int32_t clarity_mesh_ingest(ClarityMeshNode *node, const uint8_t *frame, size_t frame_len);
+ClarityBuffer clarity_mesh_pending_broadcast(const ClarityMeshNode *node);
+ClarityBuffer clarity_mesh_take_inbox(ClarityMeshNode *node);
 
 #ifdef __cplusplus
 } /* extern "C" */
