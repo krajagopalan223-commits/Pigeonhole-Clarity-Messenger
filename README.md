@@ -139,7 +139,7 @@ docs/    source/        the original Clarity documents, verbatim
 | [`clarity-relay`](relay) | Zero-plaintext prekey directory + offline mailbox | ✅ 3 |
 | [`clarity-net`](net) | Relay transport with first-class Tor (SOCKS5/`.onion`) | ✅ 3 |
 | [`clarity-mesh`](mesh) | Bluetooth mesh routing (flooding, dedup, carry-forward) | ✅ 6 |
-| [`app`](app) | Flutter UI, FFI bindings, isolate worker, mesh bridge | 🟡 unbuilt |
+| [`app`](app) | Flutter UI, FFI bindings, isolate worker, mesh bridge | ✅ 11 (Linux build verified; iOS/Android unbuilt) |
 
 Because the core is transport-agnostic, all three transports implement one
 `MessageTransport` trait — the app can hold a `dyn MessageTransport` and switch

@@ -4,8 +4,9 @@ An honest, section-by-section accounting of what exists in this repository,
 what is deliberately deferred, and what was rejected — mapped against the
 original [Clarity Technical Specification](docs/source/clarity-technical-specification-v1.0.txt).
 
-**Version:** v0.1 foundation · **Tests:** 36 passing across 5 Rust crates ·
-**Code:** ~4,100 lines Rust, ~1,700 lines Dart · **Audited:** no.
+**Version:** v0.1 foundation · **Tests:** 36 Rust (5 crates) + 11 Dart
+(native FFI round trip, mesh bridge, models) · **Code:** ~4,100 lines Rust,
+~1,900 lines Dart · **Audited:** no.
 
 Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 🔜 deferred (planned) · ❌ rejected (with reason)
@@ -26,7 +27,8 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 | Tor transport (`.onion`, SOCKS5) | ✅ |
 | Bluetooth mesh (off-grid, store-carry-forward) | ✅ routing / 🟡 radio |
 | TEE / enclave boundary | ✅ boundary / 🔜 hardware binding |
-| Flutter app (iOS · Android · Linux) | 🟡 code complete, unbuilt |
+| Flutter app — Linux desktop | ✅ built, analyzed, smoke-tested end-to-end |
+| Flutter app — iOS · Android | 🟡 code complete, unbuilt on device |
 | Group messaging | 🔜 (via MLS) |
 | Metadata minimization (sealed sender, rotating IDs) | 🔜 |
 | Onion network of our own, CLR token, steganography | ❌ |
@@ -88,11 +90,18 @@ session persistence, safety numbers, the relay/Tor transport, and the mesh node.
 Tests drive the whole protocol **through the C ABI only**, including a live
 relay round-trip.
 
-### `app/` — Flutter client (iOS · Android · Linux)
+### `app/` — Flutter client (iOS · Android · Linux) (11 Dart tests)
 One Dart codebase: `dart:ffi` bindings, a memory-safe wrapper, a background
 **isolate** for blocking relay/Tor calls, a mesh bridge, secure-storage
 persistence of account/contacts/sessions, a transport switcher (direct/Tor), and
 chat + safety-number UI.
+
+Verified on Linux desktop: `flutter analyze` is clean; the Dart test suite
+drives the real native library through the same FFI wrapper the app uses
+(PQXDH + Double Ratchet round trip, tamper rejection, safety numbers,
+serialize/restore, and mesh delivery over a loopback radio); and a built app
+exchanged live encrypted messages with a second client via `clarity-relay`,
+restoring its account, contact list, and sessions across a restart.
 
 ---
 
@@ -103,7 +112,7 @@ environment. Treat them as **unverified until run on a real target**.
 
 | Item | What's needed |
 |------|---------------|
-| **Flutter app build** | Flutter isn't installed here. Generate runner folders (`flutter create --platforms=android,ios,linux .`), build the native lib (`tool/build_rust.sh`), then `flutter run`. Dart code is unanalyzed and unrun — expect ordinary compile fixes on first build. |
+| **iOS / Android app build** | The Linux desktop build is done (runner committed under `app/linux/`, zero analyzer issues, tests passing, live relay round trip verified). iOS/Android still need their runner folders (`flutter create --platforms=android,ios .`), the native lib (`tool/build_rust.sh android\|ios`), and a first build on a real device. |
 | **Bluetooth radio** | `clarity-mesh` is routing only. A platform plugin must implement the `MeshRadio` interface (Android Nearby/BLE, iOS MultipeerConnectivity, Linux BlueZ). |
 | **Tor on device** | Needs a running Tor: system daemon (Linux), Orbot (Android), or an embedded Tor/Arti (iOS). |
 | **TEE hardware binding** | The enclave sealing key is currently OS-random in process memory. Binding it to Secure Enclave / StrongBox / TPM is per-platform work (see [`TEE.md`](TEE.md) Level 1). |
@@ -153,7 +162,11 @@ These were in the source documents and are **not** being built as specified.
 3. **The mesh broadcasts presence.** Joining a Bluetooth mesh announces that you
    run Clarity and roughly where you are. It is for reachability when
    infrastructure is gone — **not** for anonymity. Tor is the opposite trade.
-4. **The app is unbuilt.** Dart code has never been compiled or run.
+4. **Only the Linux build has run.** The app now builds, passes `flutter
+   analyze` with zero issues, passes 11 Dart tests (including a native FFI
+   round trip and the mesh bridge), and has exchanged live encrypted messages
+   with a second client through a relay — on Linux desktop. iOS and Android
+   have still never been compiled; expect ordinary first-build fixes there.
 5. **The relay is a reference implementation** — in-memory, no auth, no rate
    limiting, no durable storage.
 6. **1:1 only.** No group messaging.
@@ -165,8 +178,10 @@ These were in the source documents and are **not** being built as specified.
 
 ## 7. Suggested order of work
 
-1. **Build and run the Flutter app** on one platform end-to-end (Linux is
-   fastest) — this is the first real integration test of the whole stack.
+1. ~~**Build and run the Flutter app** on one platform end-to-end~~ **Done
+   on Linux**: the app builds, boots, publishes its bundle, and exchanges
+   live encrypted messages with a second client through a relay, with
+   account/contacts/sessions surviving a restart. Repeat on Android/iOS.
 2. **Independent security review** of `clarity-core` before anything ships.
 3. **Sealed sender + rotating inbox IDs** — the biggest remaining privacy win.
 4. **Bind the enclave key to secure hardware** (TEE Level 1).
