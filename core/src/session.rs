@@ -5,13 +5,14 @@
 //! [`Session::respond`] (you received a first message), then use
 //! [`Session::encrypt`] / [`Session::decrypt`] for every message after.
 
+use serde::{Deserialize, Serialize};
 use x25519_dalek::StaticSecret;
 
 use crate::error::{Error, Result};
 use crate::handshake;
 use crate::identity::{verify_bundle, Account};
 use crate::ratchet::DoubleRatchet;
-use crate::wire::{Message, PreKeyBundle};
+use crate::wire::{HandshakeHeader, Message, PreKeyBundle};
 
 /// One end of an end-to-end encrypted conversation.
 pub struct Session {
@@ -98,6 +99,40 @@ impl Session {
         self.pending_handshake = None;
         Ok(plaintext)
     }
+}
+
+impl Session {
+    /// Serialize the full session state (ratchet + associated data + pending
+    /// handshake). This is secret material: persist it only sealed/encrypted
+    /// (via [`crate::enclave::Enclave`] or OS secure storage). Serializing lets
+    /// a conversation survive an app restart and enables the stateless TEE
+    /// boundary.
+    pub fn serialize(&self) -> Vec<u8> {
+        let stored = StoredSession {
+            ratchet: self.ratchet.serialize(),
+            ad_prefix: self.ad_prefix.clone(),
+            pending_handshake: self.pending_handshake.clone(),
+        };
+        bincode::serialize(&stored).expect("session state is always serializable")
+    }
+
+    /// Restore a session from [`Session::serialize`] output.
+    pub fn deserialize(bytes: &[u8]) -> Result<Self> {
+        let s: StoredSession =
+            bincode::deserialize(bytes).map_err(|e| Error::Wire(e.to_string()))?;
+        Ok(Session {
+            ratchet: DoubleRatchet::deserialize(&s.ratchet)?,
+            ad_prefix: s.ad_prefix,
+            pending_handshake: s.pending_handshake,
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredSession {
+    ratchet: Vec<u8>,
+    ad_prefix: Vec<u8>,
+    pending_handshake: Option<HandshakeHeader>,
 }
 
 /// Associated-data prefix: the two identities in a fixed (initiator, responder)

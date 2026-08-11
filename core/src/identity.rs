@@ -14,7 +14,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::error::{Error, Result};
 use crate::pqkem::KyberKeyPair;
-use crate::wire::PreKeyBundle;
+use crate::wire::{OneTimePrekeyPublics, PreKeyBundle};
 
 // Domain-separation tags so a signature over one field can never be replayed as
 // a signature over another.
@@ -151,7 +151,7 @@ impl Account {
     /// Public halves of all one-time prekeys, for batch upload to a prekey
     /// server. The server hands these out one per fetch; the private halves stay
     /// on this device until the matching handshake consumes them.
-    pub fn one_time_prekey_publics(&self) -> Vec<(u32, [u8; 32])> {
+    pub fn one_time_prekey_publics(&self) -> OneTimePrekeyPublics {
         self.one_time_prekeys
             .iter()
             .map(|(&id, sk)| (id, PublicKey::from(sk).to_bytes()))

@@ -1,5 +1,6 @@
 //! Integration-style tests exercising the full protocol through the public API.
 
+use crate::enclave::{Enclave, Sealed};
 use crate::identity::{verify_bundle, Account};
 use crate::safety::safety_number;
 use crate::wire::{Message, PreKeyBundle};
@@ -169,6 +170,101 @@ fn safety_number_is_symmetric_and_stable() {
     assert_eq!(ab, safety_number(&a.identity_public(), &b.identity_public()));
     // 60 digits shown as 12 groups of 5 → 11 spaces plus the middle separator.
     assert_eq!(ab.chars().filter(|c| c.is_ascii_digit()).count(), 60);
+}
+
+#[test]
+fn session_survives_serialization_mid_conversation() {
+    let (_alice, _bob, mut alice_s, mut bob_s) = establish();
+
+    // Exchange a couple of messages so both ratchets have advanced.
+    let m = bob_s.encrypt(b"hi").unwrap();
+    assert_eq!(alice_s.decrypt(&m).unwrap(), b"hi");
+    let m = alice_s.encrypt(b"hey").unwrap();
+    assert_eq!(bob_s.decrypt(&m).unwrap(), b"hey");
+
+    // "Restart the app": serialize both sessions and restore fresh objects.
+    let alice_blob = alice_s.serialize();
+    let bob_blob = bob_s.serialize();
+    let mut alice_r = Session::deserialize(&alice_blob).unwrap();
+    let mut bob_r = Session::deserialize(&bob_blob).unwrap();
+
+    // The restored sessions continue the conversation seamlessly.
+    let m = alice_r.encrypt(b"after restart").unwrap();
+    assert_eq!(bob_r.decrypt(&m).unwrap(), b"after restart");
+    let m = bob_r.encrypt(b"still works").unwrap();
+    assert_eq!(alice_r.decrypt(&m).unwrap(), b"still works");
+}
+
+#[test]
+fn enclave_full_conversation_through_sealed_state() {
+    // Each side runs its own enclave. The "host" only ever holds Sealed blobs.
+    let alice_tee = Enclave::initialize();
+    let bob_tee = Enclave::initialize();
+
+    let (alice_acct, _alice_id) = alice_tee.create_account();
+    let (mut bob_acct, bob_id) = bob_tee.create_account();
+
+    // Bob publishes; the bundle is public (leaves the enclave in the clear).
+    let (bob_base, _bob_otps) = bob_tee.account_bundle(&bob_acct).unwrap();
+    // (In a real system bob_base + otps are uploaded; alice fetches bob_base.)
+    let _ = bob_id;
+
+    // Alice initiates and sends the first message — all via sealed calls.
+    let mut alice_sess = alice_tee.initiate(&alice_acct, &bob_base).unwrap();
+    let (alice_sess2, first) = alice_tee.encrypt(&alice_sess, b"sealed hello").unwrap();
+    alice_sess = alice_sess2;
+
+    // Bob responds inside his enclave; his account is re-sealed (OPK consumed).
+    let (bob_acct2, mut bob_sess, pt) = bob_tee.respond(&bob_acct, &first).unwrap();
+    bob_acct = bob_acct2;
+    assert_eq!(pt, b"sealed hello");
+    let _ = &alice_acct;
+    let _ = &bob_acct;
+
+    // Full back-and-forth, threading the new sealed state each step.
+    for i in 0..5u32 {
+        let (bs, msg) = bob_tee.encrypt(&bob_sess, format!("bob {i}").as_bytes()).unwrap();
+        bob_sess = bs;
+        let (asess, got) = alice_tee.decrypt(&alice_sess, &msg).unwrap();
+        alice_sess = asess;
+        assert_eq!(got, format!("bob {i}").as_bytes());
+
+        let (asess, msg) = alice_tee.encrypt(&alice_sess, format!("alice {i}").as_bytes()).unwrap();
+        alice_sess = asess;
+        let (bs, got) = bob_tee.decrypt(&bob_sess, &msg).unwrap();
+        bob_sess = bs;
+        assert_eq!(got, format!("alice {i}").as_bytes());
+    }
+}
+
+#[test]
+fn sealed_blobs_are_opaque_and_enclave_bound() {
+    let tee = Enclave::initialize();
+    let other = Enclave::initialize();
+
+    let (account, identity) = tee.create_account();
+
+    // The sealed account must not contain the raw identity key bytes in the clear.
+    assert!(
+        !contains_subsequence(account.as_bytes(), &identity),
+        "sealed blob leaked plaintext key material"
+    );
+
+    // A different enclave (different sealing key) cannot open the blob.
+    let (bundle, _) = tee.account_bundle(&account).unwrap();
+    assert!(other.initiate(&account, &bundle).is_err());
+
+    // A tampered sealed blob is rejected.
+    let mut tampered = account.as_bytes().to_vec();
+    tampered[0] ^= 0x01;
+    assert!(tee.account_bundle(&Sealed::from_bytes(tampered)).is_err());
+}
+
+fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 #[test]

@@ -15,6 +15,9 @@ use crate::error::{Error, Result};
 /// Current wire protocol version. Bumped on any breaking change to these types.
 pub const PROTOCOL_VERSION: u8 = 1;
 
+/// A batch of one-time prekey public keys, as `(id, x25519_public)` pairs.
+pub type OneTimePrekeyPublics = Vec<(u32, [u8; 32])>;
+
 /// A published prekey bundle. Everything here is public and signed by the
 /// owner's long-term identity key so a malicious prekey server cannot swap in
 /// its own keys to mount a MITM.

@@ -38,6 +38,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod enclave;
 pub mod error;
 pub mod handshake;
 pub mod identity;
@@ -48,6 +49,7 @@ pub mod safety;
 pub mod session;
 pub mod wire;
 
+pub use enclave::{Enclave, Sealed};
 pub use error::{Error, Result};
 pub use identity::{verify_bundle, Account};
 pub use safety::safety_number;

@@ -13,6 +13,7 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
@@ -187,6 +188,62 @@ impl DoubleRatchet {
         self.chain_send = Some(chain_send);
     }
 }
+
+impl DoubleRatchet {
+    /// Serialize the full ratchet state. This is secret material — the caller
+    /// (an [`crate::enclave::Enclave`] or the app's secure storage) must keep it
+    /// sealed/encrypted at rest.
+    pub fn serialize(&self) -> Vec<u8> {
+        let stored = StoredRatchet {
+            root_key: self.root_key,
+            dh_self: self.dh_self.to_bytes(),
+            dh_self_pub: self.dh_self_pub,
+            dh_remote: self.dh_remote,
+            chain_send: self.chain_send,
+            chain_recv: self.chain_recv,
+            n_send: self.n_send,
+            n_recv: self.n_recv,
+            pn: self.pn,
+            skipped: self.skipped.iter().map(|(&k, &v)| (k, v)).collect(),
+        };
+        bincode::serialize(&stored).expect("ratchet state is always serializable")
+    }
+
+    /// Restore a ratchet from [`DoubleRatchet::serialize`] output.
+    pub fn deserialize(bytes: &[u8]) -> Result<Self> {
+        let s: StoredRatchet =
+            bincode::deserialize(bytes).map_err(|e| Error::Wire(e.to_string()))?;
+        Ok(DoubleRatchet {
+            root_key: s.root_key,
+            dh_self: StaticSecret::from(s.dh_self),
+            dh_self_pub: s.dh_self_pub,
+            dh_remote: s.dh_remote,
+            chain_send: s.chain_send,
+            chain_recv: s.chain_recv,
+            n_send: s.n_send,
+            n_recv: s.n_recv,
+            pn: s.pn,
+            skipped: s.skipped.into_iter().collect(),
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredRatchet {
+    root_key: [u8; 32],
+    dh_self: [u8; 32],
+    dh_self_pub: [u8; 32],
+    dh_remote: Option<[u8; 32]>,
+    chain_send: Option<[u8; 32]>,
+    chain_recv: Option<[u8; 32]>,
+    n_send: u32,
+    n_recv: u32,
+    pn: u32,
+    skipped: SkippedKeyEntries,
+}
+
+/// Cached skipped message keys as `((remote_dh_pub, message_number), key)`.
+type SkippedKeyEntries = Vec<(([u8; 32], u32), [u8; 32])>;
 
 /// X25519 Diffie-Hellman, returning the raw 32-byte shared output.
 fn dh(secret: &StaticSecret, their_pub: &[u8; 32]) -> [u8; 32] {
