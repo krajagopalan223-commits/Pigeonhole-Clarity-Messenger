@@ -136,7 +136,9 @@ dependencies = [
 name = "clarity-ffi"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "clarity-core",
+ "serde_json",
 ]
 
 [[package]]
