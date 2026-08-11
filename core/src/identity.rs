@@ -148,6 +148,16 @@ impl Account {
         self.one_time_prekeys.len()
     }
 
+    /// Public halves of all one-time prekeys, for batch upload to a prekey
+    /// server. The server hands these out one per fetch; the private halves stay
+    /// on this device until the matching handshake consumes them.
+    pub fn one_time_prekey_publics(&self) -> Vec<(u32, [u8; 32])> {
+        self.one_time_prekeys
+            .iter()
+            .map(|(&id, sk)| (id, PublicKey::from(sk).to_bytes()))
+            .collect()
+    }
+
     /// Mint `count` additional one-time prekeys, returning the new ids.
     pub fn replenish_one_time_prekeys(&mut self, count: u32) -> Vec<u32> {
         let mut ids = Vec::with_capacity(count as usize);

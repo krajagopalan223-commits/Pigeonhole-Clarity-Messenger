@@ -1,9 +1,23 @@
 [package]
 name = "clarity-relay"
-description = "Thin store-and-forward relay for Clarity Messenger."
+description = "Thin, zero-plaintext store-and-forward relay for Clarity Messenger."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "clarity_relay"
+
+[[bin]]
+name = "clarity-relay"
+path = "src/main.rs"
+
 [dependencies]
 clarity-core = { path = "../core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tiny_http = "0.12"
+base64 = "0.22"
+
+[dev-dependencies]
+ureq = { version = "2", features = ["json"] }
