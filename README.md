@@ -105,7 +105,8 @@ which is why both are kept side by side.
 - **Sealed senders and rotating inboxes.** Every payload travels inside a
   sealed envelope (the sender is inside the encryption, not beside it), and
   relay mail is addressed to a mailbox ID that rotates daily — the relay
-  stores **no sender and no stable recipient** for queued messages.
+  stores **no sender and no stable recipient** for queued messages, and
+  payload sizes are padded to buckets.
 - **Infrastructure independence.** With the Bluetooth mesh, messages move with no
   internet, cell service, or servers at all.
 
@@ -115,9 +116,9 @@ No "unbreakable," no "MI6-grade," no metadata magic.
 
 - **Metadata is not fully protected.** The relay no longer sees who sent a
   message or a stable recipient mailbox, but it still sees network addresses
-  and timing (use Tor), message counts/sizes (no padding or cover traffic
-  yet), and identity-keyed prekey-directory fetches when someone adds a new
-  contact. The mesh routes by identity and broadcasts presence by design.
+  and timing (use Tor), message counts and timing patterns (sizes are
+  bucket-padded; no cover traffic yet), and identity-keyed prekey-directory
+  fetches when someone adds a new contact. The mesh routes by identity and broadcasts presence by design.
 - **The Bluetooth mesh broadcasts your presence** — that is the opposite of
   anonymity. It exists for reachability when infrastructure is gone.
 - **Endpoint compromise is out of scope.** Malware on an unlocked device reads
@@ -140,7 +141,7 @@ docs/    source/        the original Clarity documents, verbatim
 
 | Crate | Purpose | Tests |
 |-------|---------|-------|
-| [`clarity-core`](core) | Identity, PQXDH, Double Ratchet, safety numbers, sealed envelopes, rotating inboxes, enclave boundary | ✅ 25 |
+| [`clarity-core`](core) | Identity, PQXDH, Double Ratchet, safety numbers, sealed envelopes, rotating inboxes, enclave boundary | ✅ 27 |
 | [`clarity-ffi`](ffi) | C ABI over the core for Flutter/`dart:ffi` | ✅ 8 |
 | [`clarity-relay`](relay) | Zero-plaintext prekey directory + opaque-mailbox store | ✅ 3 |
 | [`clarity-net`](net) | Relay transport with first-class Tor (SOCKS5/`.onion`) | ✅ 4 |
@@ -222,7 +223,7 @@ Requires a recent Rust toolchain (built and tested on 1.94).
 
 ```bash
 # Build and test everything
-cargo test --workspace          # 46 tests
+cargo test --workspace          # 48 tests
 
 # Run a local relay
 cargo run -p clarity-relay -- 127.0.0.1:8080
@@ -256,7 +257,7 @@ libraries, and publishing the relay as an onion service — are in
 ## Testing
 
 ```bash
-cargo test --workspace     # 46 tests
+cargo test --workspace     # 48 tests
 cargo clippy --workspace --all-targets   # clean
 ```
 
@@ -284,8 +285,9 @@ against the original specification.
 
 **Built & tested:** E2E encryption · PQ handshake · Double Ratchet · signed
 prekey bundles · safety numbers · sealed-sender envelopes · rotating inbox IDs ·
-session & account persistence · relay · Tor transport · mesh routing · enclave
-boundary · C ABI · Linux app (built, analyzed, live-tested).
+size-bucket padding · session/account/history persistence · disappearing
+messages (local) · relay · Tor transport · mesh routing · enclave boundary ·
+C ABI · Linux app (built, analyzed, live-tested).
 
 **Needs device work:** iOS/Android app builds · Bluetooth radio plugin · Tor on
 device · TEE hardware key binding.
@@ -294,7 +296,8 @@ device · TEE hardware key binding.
 core · multi-device recovery · disappearing messages · **independent audit**.
 
 **Next up, in order:** get an independent review of `clarity-core` → bind
-enclave keys to secure hardware → groups via MLS → padding + cover traffic.
+enclave keys to secure hardware → groups via MLS → cover traffic + synced
+disappearing-message timers.
 
 ## Documentation map
 

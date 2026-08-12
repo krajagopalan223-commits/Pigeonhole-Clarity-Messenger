@@ -76,8 +76,9 @@ boundary, whose contract is documented in `ffi/src/lib.rs`.
 - **Metadata**: relay mail now travels in sealed-sender envelopes addressed to
   rotating inbox IDs, so the relay stores no sender and no stable recipient
   identifier. What it can still observe: network addresses and timing (run
-  over **Tor** to remove the address linkage), message counts/sizes (padding
-  and cover traffic are future work), and identity-keyed prekey *directory*
+  over **Tor** to remove the address linkage), message counts and timing
+  (sizes are padded to buckets; cover traffic is future work), and
+  identity-keyed prekey *directory*
   fetches, which are inherent to looking up a new contact.
 - **Sealed envelopes are not forward-secret for sender metadata**: compromise
   of a recipient's long-term identity DH key lets recorded envelopes be opened

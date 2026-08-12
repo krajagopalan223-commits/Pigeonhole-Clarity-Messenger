@@ -4,7 +4,7 @@ An honest, section-by-section accounting of what exists in this repository,
 what is deliberately deferred, and what was rejected — mapped against the
 original [Clarity Technical Specification](docs/source/clarity-technical-specification-v1.0.txt).
 
-**Version:** v0.1 foundation · **Tests:** 46 Rust (5 crates) + 14 Dart
+**Version:** v0.1 foundation · **Tests:** 48 Rust (5 crates) + 14 Dart
 (native FFI round trip, mesh bridge, models) · **Code:** ~4,100 lines Rust,
 ~1,900 lines Dart · **Audited:** no.
 
@@ -31,6 +31,9 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 | Flutter app — iOS · Android | 🟡 code complete, unbuilt on device |
 | Group messaging | 🔜 (via MLS) |
 | Metadata minimization (sealed sender, rotating inbox IDs) | ✅ |
+| Message size padding (bucketed sealed payloads) | ✅ |
+| Encrypted message history at rest | ✅ |
+| Disappearing messages (per-conversation retention) | ✅ local / 🔜 synced to contact |
 | Onion network of our own, CLR token, steganography | ❌ |
 | Independent security audit | 🔜 **required before real use** |
 
@@ -38,7 +41,7 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 
 ## 2. What is built and tested
 
-### `clarity-core` — the cryptographic core (25 tests)
+### `clarity-core` — the cryptographic core (27 tests)
 `#![forbid(unsafe_code)]`, no home-grown cryptography.
 
 - **Identity & prekeys** — Ed25519 identity key, X25519 identity DH key, signed
@@ -61,8 +64,9 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
   untrusted host **only as sealed AEAD blobs** (see [`TEE.md`](TEE.md)).
 - **Sealed-sender envelopes** (spec §8.5) — every payload is encrypted to the
   recipient's identity DH key with the sender's identity *inside*; transports
-  see only an ephemeral key and ciphertext. Forged sender claims fail the
-  inner handshake and are dropped.
+  see only an ephemeral key and ciphertext, and payloads are **padded to
+  size buckets** (512 B → powers of two → 8 KiB steps) so length reveals only
+  the bucket. Forged sender claims fail the inner handshake and are dropped.
 - **Rotating inbox IDs** (spec §8) — relay mail is addressed to
   `SHA-256(identity ‖ epoch)` rotating every 24 h (the spec said BLAKE3; same
   construction, the codebase's existing hash), with a catch-up poll window so
@@ -108,7 +112,10 @@ persistence of account/contacts/sessions, a transport switcher (direct/Tor), and
 chat + safety-number UI. All outgoing payloads are sealed and addressed to
 rotating inboxes; polling walks a persisted catch-up window of epochs, and
 adding a contact now also verifies the fetched bundle belongs to the identity
-that was asked for.
+that was asked for. Conversation history persists encrypted at rest (OS secure
+storage) with a per-conversation disappearing-messages timer — retention is
+enforced on this device only and says so in the UI; syncing the timer to the
+contact is future protocol work.
 
 Verified on Linux desktop: `flutter analyze` is clean; the Dart test suite
 drives the real native library through the same FFI wrapper the app uses
@@ -138,11 +145,10 @@ environment. Treat them as **unverified until run on a real target**.
 | Feature | Why deferred / what it needs |
 |---------|------------------------------|
 | **Group messaging** (spec §6 TreeKEM) | Should use an audited **MLS (RFC 9420)** library, not a bespoke TreeKEM. The spec's own design signs every group message while claiming deniability — contradictory; MLS handles this deliberately. |
-| **Cover traffic, padding, timing noise** (spec §8.2–8.4) | Fixed-size padding is cheap and worth doing. Cover traffic and timing noise have real battery/latency costs and should be measured, not assumed. |
+| **Cover traffic, timing noise** (spec §8.3–8.4) | Size padding is **done** (sealed payloads pad to 512 B–8 KiB power-of-two buckets, then 8 KiB steps). Cover traffic and timing noise have real battery/latency costs and should be measured, not assumed. |
 | **In-enclave execution** (TEE Level 2) | Running the ratchet inside SGX/TrustZone. Needs the platform SDK and a `no_std` build. |
 | **`no_std` core** | Only required for bare-metal enclaves (Fortanix SGX-EDP, Trusty). Mainstream runtimes (Gramine, Occlum, OP-TEE) run the current `std` build as-is. |
 | **Multi-device sync & recovery** (spec §9.3) | BIP-39 recovery phrase and multi-device registration. Needs careful design — recovery is where most messengers leak. |
-| **Disappearing messages** (spec §10.4) | Straightforward once sessions persist; retention policy + key wiping. |
 | **Post-quantum signatures** (spec §11.3 Phase 2) | ML-DSA/Dilithium to replace Ed25519. Reasonable roadmap item; not urgent, since signatures aren't subject to harvest-now-decrypt-later. |
 | **Client hardening** (spec §10.1) | Screen-capture blocking, clipboard protection, binary integrity. Worth doing. Note: **jailbreak/root detection is not a security boundary** — it is trivially bypassed by the attacker it claims to stop. |
 | **Independent security audit** | **The single most important remaining item.** Nothing here should protect anyone at risk until this happens. |
@@ -173,7 +179,8 @@ These were in the source documents and are **not** being built as specified.
 2. **Metadata.** Relay mail is sealed (no visible sender) and addressed to
    rotating inbox IDs (no stable recipient), so the relay no longer collects a
    contact graph from mailbox traffic — but it still sees network addresses
-   and timing unless you run over Tor, message counts/sizes (no padding yet),
+   and timing unless you run over Tor, message counts and timing patterns
+   (sizes are bucket-padded; cover traffic remains future work),
    and identity-keyed prekey fetches when someone adds a new contact. The mesh
    routes by identity and broadcasts presence by design.
 3. **The mesh broadcasts presence.** Joining a Bluetooth mesh announces that you
