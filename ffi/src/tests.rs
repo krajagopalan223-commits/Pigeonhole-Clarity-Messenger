@@ -378,3 +378,39 @@ fn sealed_envelopes_and_rotating_inboxes_over_ffi() {
         clarity_account_free(eve);
     }
 }
+
+#[test]
+fn prekey_replenishment_over_ffi() {
+    unsafe {
+        let account = clarity_account_generate();
+        let start = clarity_account_one_time_remaining(account);
+        assert!(start > 0);
+
+        // A handshake from the *base* bundle (no one-time prekey attached —
+        // the relay adds those when dispensing) must not touch the pool.
+        // Consumption itself is covered by clarity-core's tests.
+        let alice = clarity_account_generate();
+        let bundle = take_buffer(clarity_account_bundle_base(account)).unwrap();
+        let session = clarity_session_initiate(alice, bundle.as_ptr(), bundle.len());
+        let wire = take_buffer(clarity_session_encrypt(session, b"hi".as_ptr(), 2)).unwrap();
+        let mut first = ClarityBuffer::null();
+        let responder = clarity_session_respond(account, wire.as_ptr(), wire.len(), &mut first);
+        assert!(!responder.is_null());
+        take_buffer(first);
+        assert_eq!(clarity_account_one_time_remaining(account), start);
+
+        // Replenish tops the pool back up, and the new publics serialize with
+        // the account (survive persistence).
+        assert_eq!(clarity_account_replenish_prekeys(account, 5), 0);
+        assert_eq!(clarity_account_one_time_remaining(account), start + 5);
+        let bytes = take_buffer(clarity_account_serialize(account)).unwrap();
+        let restored = clarity_account_deserialize(bytes.as_ptr(), bytes.len());
+        assert_eq!(clarity_account_one_time_remaining(restored), start + 5);
+
+        clarity_session_free(session);
+        clarity_session_free(responder);
+        clarity_account_free(alice);
+        clarity_account_free(account);
+        clarity_account_free(restored);
+    }
+}

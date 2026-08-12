@@ -360,6 +360,37 @@ pub unsafe extern "C" fn clarity_safety_number(id_a: *const u8, id_b: *const u8)
     }
 }
 
+/// Number of one-time prekeys whose private halves this account still holds.
+/// When it runs low, mint more with [`clarity_account_replenish_prekeys`] and
+/// republish the bundle so the directory can keep dispensing fresh ones.
+///
+/// # Safety
+/// `acct` must be a valid account handle (returns 0 for null).
+#[no_mangle]
+pub unsafe extern "C" fn clarity_account_one_time_remaining(acct: *const Account) -> u32 {
+    match acct.as_ref() {
+        Some(a) => a.one_time_prekeys_remaining() as u32,
+        None => 0,
+    }
+}
+
+/// Mint `count` additional one-time prekeys. The account must be re-serialized
+/// (persisted) and its bundle republished afterwards. Returns 0 on success,
+/// -1 for a null handle.
+///
+/// # Safety
+/// `acct` must be a valid, mutable account handle.
+#[no_mangle]
+pub unsafe extern "C" fn clarity_account_replenish_prekeys(acct: *mut Account, count: u32) -> i32 {
+    match acct.as_mut() {
+        Some(a) => {
+            a.replenish_one_time_prekeys(count);
+            0
+        }
+        None => -1,
+    }
+}
+
 // --- Sealed sender + rotating inboxes ---------------------------------------
 
 /// The inbox epoch (24-hour window) containing `unix_seconds`.
