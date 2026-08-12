@@ -17,6 +17,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../ffi/clarity.dart';
 import '../models/models.dart';
+import '../services/content.dart';
 import '../services/mesh_service.dart';
 import '../services/relay_worker.dart';
 import '../services/transport_config.dart';
@@ -48,6 +49,11 @@ class AppState extends ChangeNotifier {
   /// Widest catch-up window of rotating inboxes polled in one tick (30 days'
   /// worth); mail parked under inboxes older than the window is left behind.
   static const _maxPollEpochs = 30;
+
+  /// Mint more one-time prekeys when the local pool drops below this, topping
+  /// back up to the target. Each new inbound session consumes one.
+  static const _prekeyLowWater = 40;
+  static const _prekeyTarget = 100;
 
   Account? _account;
   Uint8List? _myIdentity;
@@ -91,14 +97,43 @@ class AppState extends ChangeNotifier {
   }
 
   /// Set (or clear, with null) the disappearing-messages timer for a contact.
-  /// Applies to this device's copy of the history; takes effect immediately.
+  /// Applies here immediately and sends an in-band control message asking the
+  /// contact's app to adopt the same timer (best effort — their client
+  /// honors it, but nothing can force a hostile client to delete anything).
   Future<void> setRetention(String contactId, int? seconds) async {
     final contact = _contacts[contactId];
     if (contact == null) return;
     contact.retentionSeconds = seconds;
     await _persistContacts();
+    if (_sessions[contactId] != null) {
+      await _sendContent(contactId, TimerUpdateContent(seconds));
+      _appendInfo(contactId, 'You set disappearing messages to ${retentionLabel(seconds)}.');
+    }
     _sweepExpiredMessages(persist: true);
     notifyListeners();
+  }
+
+  /// Encrypt, seal, and send typed content to a contact over the active
+  /// transport, persisting the advanced ratchet.
+  Future<void> _sendContent(String contactId, MessageContent content) async {
+    final session = _sessions[contactId];
+    final contact = _contacts[contactId];
+    if (session == null || contact == null) {
+      throw StateError('no session for contact');
+    }
+    final wire = session.encrypt(content.encode());
+    final envelope = _account!.sealEnvelope(contact.identityDh, wire);
+    await _transportSend(contact, envelope);
+    await _persistSession(contactId); // ratchet advanced
+  }
+
+  void _appendInfo(String contactId, String text) {
+    _conversations.putIfAbsent(contactId, () => []).add(ChatMessage(
+          direction: MessageDirection.info,
+          text: text,
+          timestamp: DateTime.now(),
+        ));
+    unawaited(_persistHistory(contactId));
   }
 
   void _sweepExpiredMessages({required bool persist}) {
@@ -131,6 +166,7 @@ class AppState extends ChangeNotifier {
     if (_config.usesRelay) {
       _relay = await RelayWorker.start(_config);
       await _publishBundle();
+      unawaited(_maybeReplenishPrekeys());
       _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _pollOnce());
     } else if (_config.mode == TransportMode.mesh) {
       final radio = _meshRadio;
@@ -162,6 +198,26 @@ class AppState extends ChangeNotifier {
     final bundle = account.bundleBase();
     final oneTimeJson = Uint8List.fromList(utf8.encode(jsonEncode(account.oneTimePublics())));
     await _relay?.publish(bundle, oneTimeJson);
+  }
+
+  bool _replenishing = false;
+
+  /// Top the one-time prekey pool back up when it runs low, then persist the
+  /// account (the new private halves must survive a restart) and republish so
+  /// the directory can dispense the fresh publics.
+  Future<void> _maybeReplenishPrekeys() async {
+    final account = _account;
+    if (_replenishing || account == null || _relay == null) return;
+    final remaining = account.oneTimeRemaining();
+    if (remaining >= _prekeyLowWater) return;
+    _replenishing = true;
+    try {
+      account.replenishOneTimePrekeys(_prekeyTarget - remaining);
+      await _storage.write(key: _accountKey, value: base64.encode(account.serialize()));
+      await _publishBundle();
+    } finally {
+      _replenishing = false;
+    }
   }
 
   /// Add a contact by identity key and open an outgoing session.
@@ -199,21 +255,12 @@ class AppState extends ChangeNotifier {
 
   /// Send a text message to a contact.
   Future<void> sendMessage(String contactId, String text) async {
-    final session = _sessions[contactId];
-    final contact = _contacts[contactId];
-    if (session == null || contact == null) {
-      throw StateError('no session for contact');
-    }
-    final wire = session.encrypt(Uint8List.fromList(utf8.encode(text)));
-    final envelope = _account!.sealEnvelope(contact.identityDh, wire);
-    await _transportSend(contact, envelope);
-
+    await _sendContent(contactId, TextContent(text));
     _conversations[contactId]!.add(ChatMessage(
       direction: MessageDirection.outgoing,
       text: text,
       timestamp: DateTime.now(),
     ));
-    await _persistSession(contactId); // ratchet advanced
     unawaited(_persistHistory(contactId));
     notifyListeners();
   }
@@ -291,7 +338,8 @@ class AppState extends ChangeNotifier {
         plaintext = existing.decrypt(opened.payload);
       } else {
         // The claimed sender is authenticated here: only the real holder of
-        // these identity keys produces a handshake that completes.
+        // these identity keys produces a handshake that completes. The
+        // handshake may have consumed a one-time prekey — restock if low.
         final (session, first) = _account!.respondToSession(opened.payload);
         _sessions[senderKey] = session;
         _contacts.putIfAbsent(
@@ -303,19 +351,38 @@ class AppState extends ChangeNotifier {
           ),
         );
         _conversations.putIfAbsent(senderKey, () => []);
+        unawaited(_maybeReplenishPrekeys());
         plaintext = first;
       }
-      _conversations.putIfAbsent(senderKey, () => []).add(ChatMessage(
-            direction: MessageDirection.incoming,
-            text: utf8.decode(plaintext),
-            timestamp: DateTime.now(),
-          ));
-      // Persist advanced session, history, and possibly-new contact
-      // (fire and forget).
+
+      // Persist advanced session and possibly-new contact (fire and forget).
       unawaited(_persistSession(senderKey));
-      unawaited(_persistHistory(senderKey));
       unawaited(_persistContacts());
-      return true;
+
+      switch (MessageContent.decode(plaintext)) {
+        case TextContent(:final body):
+          _conversations.putIfAbsent(senderKey, () => []).add(ChatMessage(
+                direction: MessageDirection.incoming,
+                text: body,
+                timestamp: DateTime.now(),
+              ));
+          unawaited(_persistHistory(senderKey));
+          return true;
+        case TimerUpdateContent(:final seconds):
+          final contact = _contacts[senderKey];
+          if (contact == null) return false;
+          contact.retentionSeconds = seconds;
+          unawaited(_persistContacts());
+          _appendInfo(
+            senderKey,
+            '${contact.displayName} set disappearing messages to '
+            '${retentionLabel(seconds)}.',
+          );
+          _sweepExpiredMessages(persist: true);
+          return true;
+        case UnknownContent():
+          return false; // a future message type: session advanced, nothing shown
+      }
     } on ClarityException {
       return false; // not for us, tampered, or a forged sender claim: drop
     }
@@ -355,7 +422,11 @@ class AppState extends ChangeNotifier {
     }
     final list = messages
         .map((m) => {
-              'd': m.direction == MessageDirection.outgoing ? 'out' : 'in',
+              'd': switch (m.direction) {
+                MessageDirection.outgoing => 'out',
+                MessageDirection.incoming => 'in',
+                MessageDirection.info => 'info',
+              },
               't': m.text,
               'ts': m.timestamp.millisecondsSinceEpoch,
             })
@@ -370,8 +441,11 @@ class AppState extends ChangeNotifier {
     _conversations[contactId] = [
       for (final entry in list)
         ChatMessage(
-          direction:
-              entry['d'] == 'out' ? MessageDirection.outgoing : MessageDirection.incoming,
+          direction: switch (entry['d']) {
+            'out' => MessageDirection.outgoing,
+            'info' => MessageDirection.info,
+            _ => MessageDirection.incoming,
+          },
           text: entry['t'] as String,
           timestamp: DateTime.fromMillisecondsSinceEpoch(entry['ts'] as int),
         ),

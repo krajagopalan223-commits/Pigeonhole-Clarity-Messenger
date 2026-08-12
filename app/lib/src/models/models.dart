@@ -31,8 +31,9 @@ class Contact {
   String get id => identity.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }
 
-/// The direction a message travelled.
-enum MessageDirection { incoming, outgoing }
+/// The direction a message travelled; [info] is a local status line (e.g. a
+/// disappearing-timer change), not something that crossed the wire as chat.
+enum MessageDirection { incoming, outgoing, info }
 
 /// A single decrypted message shown in a conversation.
 class ChatMessage {

@@ -140,9 +140,10 @@ class _ChatScreenState extends State<ChatScreen> {
         _retentionOptions.firstWhere((o) => o.$2 == seconds).$1.toLowerCase();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(seconds == null
-          ? 'Messages are kept until you delete them.'
-          : 'Messages older than $label are deleted on this device. '
-              'Your contact keeps their own copy.'),
+          ? 'Messages are kept until you delete them. Your contact was asked '
+              'to turn their timer off too.'
+          : 'Messages older than $label are deleted. Your contact\'s app was '
+              'asked to apply the same timer.'),
     ));
   }
 
@@ -188,6 +189,18 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (message.direction == MessageDirection.info) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: Text(
+            message.text,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      );
+    }
     final outgoing = message.direction == MessageDirection.outgoing;
     final color = outgoing
         ? Theme.of(context).colorScheme.primaryContainer

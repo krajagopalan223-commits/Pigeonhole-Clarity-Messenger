@@ -202,6 +202,17 @@ class Account {
     }
   }
 
+  /// One-time prekeys whose private halves this account still holds.
+  int oneTimeRemaining() => _b.oneTimeRemaining(_handle);
+
+  /// Mint `count` more one-time prekeys. Persist the account and republish
+  /// the bundle afterwards so the directory can dispense the new ones.
+  void replenishOneTimePrekeys(int count) {
+    if (_b.replenishPrekeys(_handle, count) != 0) {
+      throw const ClarityException('prekey replenishment failed');
+    }
+  }
+
   /// Seal a payload to a recipient's X25519 identity DH key. Our identity
   /// keys travel *inside* the encryption; the transport sees only an
   /// ephemeral key and ciphertext.

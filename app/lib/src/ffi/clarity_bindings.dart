@@ -96,6 +96,11 @@ typedef _RelaySend = int Function(Pointer<RelayTransport>, Pointer<Uint8>, Point
 typedef _RelayPollNative = ClarityBuffer Function(Pointer<RelayTransport>, Pointer<Uint8>);
 typedef _RelayPoll = ClarityBuffer Function(Pointer<RelayTransport>, Pointer<Uint8>);
 
+typedef _OneTimeRemainingNative = Uint32 Function(Pointer<ClarityAccount>);
+typedef _OneTimeRemaining = int Function(Pointer<ClarityAccount>);
+typedef _ReplenishNative = Int32 Function(Pointer<ClarityAccount>, Uint32);
+typedef _Replenish = int Function(Pointer<ClarityAccount>, int);
+
 // Sealed sender + rotating inboxes
 typedef _EpochForUnixNative = Uint64 Function(Uint64);
 typedef _EpochForUnix = int Function(int);
@@ -176,6 +181,10 @@ class ClarityBindings {
             lib.lookupFunction<_RelayFetchNative, _RelayFetch>('clarity_relay_fetch_bundle'),
         relaySend = lib.lookupFunction<_RelaySendNative, _RelaySend>('clarity_relay_send'),
         relayPoll = lib.lookupFunction<_RelayPollNative, _RelayPoll>('clarity_relay_poll'),
+        oneTimeRemaining = lib.lookupFunction<_OneTimeRemainingNative, _OneTimeRemaining>(
+            'clarity_account_one_time_remaining'),
+        replenishPrekeys =
+            lib.lookupFunction<_ReplenishNative, _Replenish>('clarity_account_replenish_prekeys'),
         epochForUnix =
             lib.lookupFunction<_EpochForUnixNative, _EpochForUnix>('clarity_epoch_for_unix'),
         inboxId = lib.lookupFunction<_InboxIdNative, _InboxId>('clarity_inbox_id'),
@@ -220,6 +229,8 @@ class ClarityBindings {
   final _RelayFetch relayFetch;
   final _RelaySend relaySend;
   final _RelayPoll relayPoll;
+  final _OneTimeRemaining oneTimeRemaining;
+  final _Replenish replenishPrekeys;
   final _EpochForUnix epochForUnix;
   final _InboxId inboxId;
   final _BundleIdentityKeys bundleIdentityKeys;
