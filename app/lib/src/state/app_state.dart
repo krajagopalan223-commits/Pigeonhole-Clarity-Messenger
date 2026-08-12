@@ -43,6 +43,7 @@ class AppState extends ChangeNotifier {
   static const _contactsKey = 'clarity.contacts.v2';
   static const _lastPollEpochKey = 'clarity.lastPollEpoch.v1';
   static String _sessionKey(String contactId) => 'clarity.session.$contactId.v1';
+  static String _historyKey(String contactId) => 'clarity.history.$contactId.v1';
 
   /// Widest catch-up window of rotating inboxes polled in one tick (30 days'
   /// worth); mail parked under inboxes older than the window is left behind.
@@ -55,6 +56,7 @@ class AppState extends ChangeNotifier {
   RelayWorker? _relay;
   MeshService? _mesh;
   Timer? _pollTimer;
+  Timer? _retentionTimer;
   StreamSubscription<Uint8List>? _meshSub;
 
   final Map<String, Contact> _contacts = {};
@@ -81,8 +83,40 @@ class AppState extends ChangeNotifier {
     _myIdentity = _account!.identityPublic();
 
     await _restoreContactsAndSessions();
+    _sweepExpiredMessages(persist: true);
+    _retentionTimer =
+        Timer.periodic(const Duration(minutes: 1), (_) => _sweepExpiredMessages(persist: true));
     await _startTransport();
     notifyListeners();
+  }
+
+  /// Set (or clear, with null) the disappearing-messages timer for a contact.
+  /// Applies to this device's copy of the history; takes effect immediately.
+  Future<void> setRetention(String contactId, int? seconds) async {
+    final contact = _contacts[contactId];
+    if (contact == null) return;
+    contact.retentionSeconds = seconds;
+    await _persistContacts();
+    _sweepExpiredMessages(persist: true);
+    notifyListeners();
+  }
+
+  void _sweepExpiredMessages({required bool persist}) {
+    final now = DateTime.now();
+    var changed = false;
+    for (final contact in _contacts.values) {
+      final retention = contact.retentionSeconds;
+      final messages = _conversations[contact.id];
+      if (retention == null || messages == null || messages.isEmpty) continue;
+      final cutoff = now.subtract(Duration(seconds: retention));
+      final before = messages.length;
+      messages.removeWhere((m) => m.timestamp.isBefore(cutoff));
+      if (messages.length != before) {
+        changed = true;
+        if (persist) unawaited(_persistHistory(contact.id));
+      }
+    }
+    if (changed) notifyListeners();
   }
 
   /// Switch transports at runtime (relay/Tor/mesh).
@@ -180,6 +214,7 @@ class AppState extends ChangeNotifier {
       timestamp: DateTime.now(),
     ));
     await _persistSession(contactId); // ratchet advanced
+    unawaited(_persistHistory(contactId));
     notifyListeners();
   }
 
@@ -275,8 +310,10 @@ class AppState extends ChangeNotifier {
             text: utf8.decode(plaintext),
             timestamp: DateTime.now(),
           ));
-      // Persist advanced session + possibly-new contact (fire and forget).
+      // Persist advanced session, history, and possibly-new contact
+      // (fire and forget).
       unawaited(_persistSession(senderKey));
+      unawaited(_persistHistory(senderKey));
       unawaited(_persistContacts());
       return true;
     } on ClarityException {
@@ -302,9 +339,43 @@ class AppState extends ChangeNotifier {
               'identityDh': base64.encode(c.identityDh),
               'name': c.displayName,
               'verified': c.verified,
+              if (c.retentionSeconds != null) 'retention': c.retentionSeconds,
             })
         .toList();
     await _storage.write(key: _contactsKey, value: jsonEncode(list));
+  }
+
+  /// Persist a conversation's messages (or clear the key when empty). Stored
+  /// in OS secure storage like everything else — encrypted at rest.
+  Future<void> _persistHistory(String contactId) async {
+    final messages = _conversations[contactId];
+    if (messages == null || messages.isEmpty) {
+      await _storage.delete(key: _historyKey(contactId));
+      return;
+    }
+    final list = messages
+        .map((m) => {
+              'd': m.direction == MessageDirection.outgoing ? 'out' : 'in',
+              't': m.text,
+              'ts': m.timestamp.millisecondsSinceEpoch,
+            })
+        .toList();
+    await _storage.write(key: _historyKey(contactId), value: jsonEncode(list));
+  }
+
+  Future<void> _restoreHistory(String contactId) async {
+    final raw = await _storage.read(key: _historyKey(contactId));
+    if (raw == null) return;
+    final list = (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
+    _conversations[contactId] = [
+      for (final entry in list)
+        ChatMessage(
+          direction:
+              entry['d'] == 'out' ? MessageDirection.outgoing : MessageDirection.incoming,
+          text: entry['t'] as String,
+          timestamp: DateTime.fromMillisecondsSinceEpoch(entry['ts'] as int),
+        ),
+    ];
   }
 
   Future<void> _restoreContactsAndSessions() async {
@@ -321,9 +392,10 @@ class AppState extends ChangeNotifier {
         identityDh: Uint8List.fromList(base64.decode(entry['identityDh'] as String)),
         displayName: entry['name'] as String,
         verified: entry['verified'] as bool? ?? false,
-      );
+      )..retentionSeconds = entry['retention'] as int?;
       _contacts[contact.id] = contact;
       _conversations.putIfAbsent(contact.id, () => []);
+      await _restoreHistory(contact.id);
 
       final sessionRaw = await _storage.read(key: _sessionKey(contact.id));
       if (sessionRaw != null) {
@@ -343,6 +415,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _retentionTimer?.cancel();
     _stopTransport();
     for (final s in _sessions.values) {
       s.dispose();

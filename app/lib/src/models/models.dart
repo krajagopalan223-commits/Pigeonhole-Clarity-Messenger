@@ -22,6 +22,11 @@ class Contact {
   /// Whether the user has confirmed this contact's safety number out-of-band.
   bool verified;
 
+  /// Disappearing-messages timer for this conversation, in seconds. Messages
+  /// older than this are deleted **on this device**; null keeps them forever.
+  /// The timer is not (yet) synced to the contact — their copy is theirs.
+  int? retentionSeconds;
+
   /// Lowercase hex of the identity, used as a stable map key.
   String get id => identity.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }

@@ -63,6 +63,22 @@ class _ChatScreenState extends State<ChatScreen> {
           appBar: AppBar(
             title: Text(_contact.displayName),
             actions: [
+              PopupMenuButton<int?>(
+                icon: Icon(_contact.retentionSeconds != null
+                    ? Icons.timer
+                    : Icons.timer_off_outlined),
+                tooltip: 'Disappearing messages',
+                initialValue: _contact.retentionSeconds,
+                onSelected: (seconds) => _setRetention(context, seconds),
+                itemBuilder: (context) => [
+                  for (final (label, seconds) in _retentionOptions)
+                    CheckedPopupMenuItem<int?>(
+                      value: seconds,
+                      checked: _contact.retentionSeconds == seconds,
+                      child: Text(label),
+                    ),
+                ],
+              ),
               IconButton(
                 icon: Icon(_contact.verified ? Icons.verified_user : Icons.shield_outlined),
                 tooltip: 'Verify safety number',
@@ -108,6 +124,26 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       },
     );
+  }
+
+  static const _retentionOptions = <(String, int?)>[
+    ('Keep forever', null),
+    ('1 hour', 3600),
+    ('1 day', 86400),
+    ('1 week', 604800),
+  ];
+
+  Future<void> _setRetention(BuildContext context, int? seconds) async {
+    await widget.state.setRetention(widget.contactId, seconds);
+    if (!context.mounted) return;
+    final label =
+        _retentionOptions.firstWhere((o) => o.$2 == seconds).$1.toLowerCase();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(seconds == null
+          ? 'Messages are kept until you delete them.'
+          : 'Messages older than $label are deleted on this device. '
+              'Your contact keeps their own copy.'),
+    ));
   }
 
   void _showSafetyNumber(BuildContext context) {
