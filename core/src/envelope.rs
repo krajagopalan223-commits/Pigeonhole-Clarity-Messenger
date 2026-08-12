@@ -14,9 +14,21 @@
 //! shared            = DH(eph_secret, recipient_identity_dh)
 //! seal_key          = HKDF-SHA256(salt = "Clarity-sealed-salt-v1", ikm = shared,
 //!                                 info = "Clarity-sealed-v1" ‖ eph_pub ‖ recipient_dh)
-//! blob              = 0x01 ‖ eph_pub(32) ‖ AEAD(seal_key, plaintext, aad = eph_pub)
-//! plaintext         = sender_identity_ed(32) ‖ sender_identity_dh(32) ‖ payload
+//! blob              = 0x02 ‖ eph_pub(32) ‖ AEAD(seal_key, plaintext, aad = eph_pub)
+//! plaintext         = sender_identity_ed(32) ‖ sender_identity_dh(32)
+//!                     ‖ payload_len_le32 ‖ payload ‖ zero padding
 //! ```
+//!
+//! ## Size padding
+//!
+//! The payload is padded to a **size bucket** before sealing (spec §8.2), so
+//! ciphertext length reveals only the bucket, not the message length: two
+//! messages in the same bucket produce byte-for-byte equal-length blobs.
+//! Buckets: 512 bytes minimum, then powers of two up to 8 KiB, then multiples
+//! of 8 KiB. Geometric buckets cap the overhead at 2× while keeping the
+//! number of distinguishable sizes logarithmic; message *counts and timing*
+//! are still visible — that is cover traffic's job, which remains future work
+//! with a real battery cost to measure first.
 //!
 //! AEAD is the crate-standard XChaCha20-Poly1305 with the (key, nonce) pair
 //! HKDF-derived from `seal_key` ([`crate::kdf`]); the key is unique per
@@ -49,12 +61,32 @@ use crate::error::{Error, Result};
 use crate::identity::Account;
 use crate::kdf::{aead_open, aead_seal};
 
-/// Version byte prefixed to every sealed envelope.
-pub const SEALED_ENVELOPE_VERSION: u8 = 1;
+/// Version byte prefixed to every sealed envelope. v2 added size padding.
+pub const SEALED_ENVELOPE_VERSION: u8 = 2;
 
 /// Fixed overhead: version(1) + ephemeral public(32) + Poly1305 tag(16).
 const HEADER_LEN: usize = 1 + 32;
 const INNER_PREFIX_LEN: usize = 64;
+/// Length prefix in front of the padded payload.
+const LEN_PREFIX: usize = 4;
+/// Smallest padded payload size.
+const MIN_BUCKET: usize = 512;
+/// Above this, buckets grow linearly instead of doubling.
+const MAX_POW2_BUCKET: usize = 8 * 1024;
+
+/// The padded size for a payload of `len` bytes (length prefix included):
+/// 512 minimum, then the next power of two up to 8 KiB, then the next
+/// multiple of 8 KiB.
+fn bucket(len: usize) -> usize {
+    let needed = len + LEN_PREFIX;
+    if needed <= MIN_BUCKET {
+        return MIN_BUCKET;
+    }
+    if needed <= MAX_POW2_BUCKET {
+        return needed.next_power_of_two();
+    }
+    needed.div_ceil(MAX_POW2_BUCKET) * MAX_POW2_BUCKET
+}
 
 /// A successfully opened sealed envelope.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,10 +114,13 @@ pub fn seal_envelope(
     let mut seal_key = derive_seal_key(&shared, &eph_pub, recipient_identity_dh);
     shared.zeroize();
 
-    let mut inner = Vec::with_capacity(INNER_PREFIX_LEN + payload.len());
+    let padded = bucket(payload.len());
+    let mut inner = Vec::with_capacity(INNER_PREFIX_LEN + padded);
     inner.extend_from_slice(&sender.identity_public());
     inner.extend_from_slice(&sender.identity_dh_public());
+    inner.extend_from_slice(&(payload.len() as u32).to_le_bytes());
     inner.extend_from_slice(payload);
+    inner.resize(INNER_PREFIX_LEN + padded, 0);
 
     let ciphertext = aead_seal(&seal_key, &inner, &eph_pub);
     seal_key.zeroize();
@@ -122,7 +157,7 @@ pub fn open_envelope(recipient: &Account, blob: &[u8]) -> Result<OpenedEnvelope>
     seal_key.zeroize();
     let mut inner = opened?;
 
-    if inner.len() < INNER_PREFIX_LEN {
+    if inner.len() < INNER_PREFIX_LEN + LEN_PREFIX {
         inner.zeroize();
         return Err(Error::Decrypt);
     }
@@ -130,7 +165,17 @@ pub fn open_envelope(recipient: &Account, blob: &[u8]) -> Result<OpenedEnvelope>
     let mut sender_dh = [0u8; 32];
     sender_ed.copy_from_slice(&inner[..32]);
     sender_dh.copy_from_slice(&inner[32..64]);
-    let payload = inner[INNER_PREFIX_LEN..].to_vec();
+    let payload_len = u32::from_le_bytes(
+        inner[INNER_PREFIX_LEN..INNER_PREFIX_LEN + LEN_PREFIX]
+            .try_into()
+            .expect("slice is 4 bytes"),
+    ) as usize;
+    let start = INNER_PREFIX_LEN + LEN_PREFIX;
+    if payload_len > inner.len() - start {
+        inner.zeroize();
+        return Err(Error::Decrypt);
+    }
+    let payload = inner[start..start + payload_len].to_vec();
     inner.zeroize();
 
     Ok(OpenedEnvelope {
@@ -214,5 +259,39 @@ mod tests {
         let bob = Account::generate();
         let blob = seal_envelope(&alice, &bob.identity_dh_public(), b"");
         assert_eq!(open_envelope(&bob, &blob).unwrap().payload, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn blob_length_reveals_only_the_bucket() {
+        let alice = Account::generate();
+        let bob = Account::generate();
+        let dh = bob.identity_dh_public();
+        let blob_len = |n: usize| seal_envelope(&alice, &dh, &vec![0xAA; n]).len();
+
+        // Everything in the first bucket is byte-for-byte the same length.
+        let min = blob_len(0);
+        assert_eq!(blob_len(1), min);
+        assert_eq!(blob_len(200), min);
+        assert_eq!(blob_len(508), min); // 508 + 4-byte length prefix = 512
+        // Fixed framing: version + eph(32) + inner prefix(64) + bucket + tag(16).
+        assert_eq!(min, 1 + 32 + 64 + 512 + 16);
+
+        // One byte over the boundary jumps to the next power of two...
+        assert_eq!(blob_len(509), 1 + 32 + 64 + 1024 + 16);
+        assert_eq!(blob_len(1020), blob_len(509));
+        // ...and past 8 KiB buckets grow linearly.
+        assert_eq!(blob_len(100_000), 1 + 32 + 64 + 106_496 + 16);
+    }
+
+    #[test]
+    fn padded_payloads_round_trip_at_boundaries() {
+        let alice = Account::generate();
+        let bob = Account::generate();
+        let dh = bob.identity_dh_public();
+        for n in [0usize, 1, 508, 509, 8188, 8189, 100_000] {
+            let payload = vec![0x5A; n];
+            let blob = seal_envelope(&alice, &dh, &payload);
+            assert_eq!(open_envelope(&bob, &blob).unwrap().payload, payload, "n={n}");
+        }
     }
 }
