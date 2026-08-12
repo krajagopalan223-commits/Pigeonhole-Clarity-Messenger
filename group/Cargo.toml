@@ -1,0 +1,19 @@
+[package]
+name = "clarity-group"
+description = "Group messaging for Clarity via MLS (RFC 9420), built on the audited OpenMLS library."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "clarity_group"
+
+[dependencies]
+# Group messaging uses an audited MLS implementation rather than a bespoke
+# TreeKEM — see this crate's docs and STATUS.md for the reasoning.
+openmls = "0.6"
+openmls_rust_crypto = "0.3"
+openmls_basic_credential = "0.3"
+openmls_traits = "0.3"
+tls_codec = "0.4"
+thiserror = { workspace = true }
