@@ -73,9 +73,16 @@ boundary, whose contract is documented in `ffi/src/lib.rs`.
 ## Known limitations (v0.1)
 
 - **Not independently audited.** Do not protect at-risk users with it yet.
-- **Session state is in-memory**; only the account persists. Sessions
-  re-establish after an app restart.
-- **Metadata exposure at the relay** until a Tor/sealed-sender transport lands.
+- **Metadata**: relay mail now travels in sealed-sender envelopes addressed to
+  rotating inbox IDs, so the relay stores no sender and no stable recipient
+  identifier. What it can still observe: network addresses and timing (run
+  over **Tor** to remove the address linkage), message counts/sizes (padding
+  and cover traffic are future work), and identity-keyed prekey *directory*
+  fetches, which are inherent to looking up a new contact.
+- **Sealed envelopes are not forward-secret for sender metadata**: compromise
+  of a recipient's long-term identity DH key lets recorded envelopes be opened
+  to reveal *who wrote to them* (message content keeps forward secrecy from
+  the ratchet). This matches Signal's sealed-sender trade-off.
 - **1:1 only**; no group messaging.
 - The relay is **in-memory** (no durable storage, no auth/rate-limiting) — a
   reference implementation, not a hardened production service.
