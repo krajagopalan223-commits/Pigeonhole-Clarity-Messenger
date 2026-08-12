@@ -89,25 +89,39 @@ contacts, poll loop) → Material UI. Talks to the relay over HTTPS.
 | Party | Can it read messages? | Can it forge/tamper? | What it *does* learn |
 |-------|----------------------|----------------------|----------------------|
 | Endpoint (your device) | Yes (it's the plaintext) | — | Everything (out of scope: device compromise) |
-| Relay operator | **No** | **No** (AEAD + signed bundles) | Contact graph, timing, sizes |
+| Relay operator | **No** | **No** (AEAD + signed bundles) | Timing, sizes, network addresses (unless Tor), directory fetches — but **no sender** and **no stable recipient** on mailbox traffic (sealed envelopes + rotating inboxes) |
 | Passive network | No | No | Same metadata as the relay, minus server state |
 | Malicious prekey server | No | **No** — bundles are identity-signed and client-verified | Which identities are fetched |
 
 ## Metadata: the honest story
 
-The relay routes by a **stable recipient identity key**, and the app wraps each
-payload in a `{sender, payload}` envelope so the recipient can pick the right
-session. Both choices expose a **contact graph** to whoever runs the relay. This
-is a conscious v1 trade-off for simplicity and reliability.
+Two of the three planned mitigations are now **built and tested**:
 
-The right mitigations are **transport-layer**, kept separate from the crypto
-core:
+- **Sealed-sender envelopes** (`core/src/envelope.rs`): every payload travels
+  inside an encryption to the recipient's identity DH key, with the sender's
+  identity keys *inside* it. The relay and mesh couriers see a fresh ephemeral
+  key and ciphertext — no sender field, and no initiator identity in the
+  first-message handshake header either. The outer layer deliberately
+  authenticates nobody; authenticity still comes from the inner
+  handshake/ratchet, so a forged sender claim simply fails to decrypt.
+- **Rotating inbox IDs** (`core/src/inbox.rs`): relay mail is addressed to
+  `SHA-256("Clarity-inbox-v1" ‖ identity ‖ epoch)`, rotating every 24 h (the
+  spec's construction, with the codebase's one hash instead of a new BLAKE3
+  dependency). The mailbox store holds no stable recipient identifier;
+  receivers poll a catch-up window of adjacent epochs so clock skew and
+  offline gaps don't strand mail.
 
-- Run all relay traffic over **Tor** (or an equivalent), so the relay can't tie
-  requests to network identities.
-- Rotate to **anonymous inbox IDs** (`BLAKE3(identity ‖ epoch)`) instead of raw
-  identity keys.
-- Sealed-sender style envelopes so the relay can't see the sender field.
+What the relay operator can **still** learn, stated plainly:
+
+- **Network linkage**: your IP contacts the relay. Run over **Tor** (built) to
+  remove it — without Tor, address-plus-timing can substitute for the deleted
+  routing metadata.
+- **Directory lookups**: fetching a *new* contact's prekey bundle names that
+  identity — inherent to a directory. High-volume mailbox traffic no longer
+  does.
+- **Counts, sizes, timing**: padding and cover traffic remain future work.
+- The **mesh** still routes by identity and broadcasts presence by design;
+  couriers now at least carry sealed envelopes they cannot attribute.
 
 Inventing a *new* onion network (as the source spec proposed) is strictly worse
 than reusing a mature, audited one — so that is explicitly not in scope.
@@ -118,13 +132,13 @@ than reusing a mature, audited one — so that is explicitly not in scope.
 |------------------------------|-------------------|
 | Custom decentralized relay network + PBFT + token | A separate distributed-systems/economics project; Tor + simple relays cover the need. |
 | Steganographic transports (TCP ISN, DNS, etc.) | Largely detectable in practice; Tor pluggable transports do this better and safer. |
-| Bluetooth mesh / NFC dead drops | Niche transports; each is its own effort with little v1 value. |
+| NFC dead drops | Niche transport with little v1 value. (The Bluetooth mesh, by contrast, *is* built — routing tested, radio plugin pending; see `MESH.md`.) |
 | Group messaging | Should use an audited **MLS** (RFC 9420) library, not a bespoke TreeKEM. |
 | PQ *ratchet* (not just handshake) | We match Signal's PQXDH: PQ on setup. A PQ ratchet is a live research area. |
 
 ## Testing
 
-`cargo test --workspace` runs 21 tests: full protocol round-trips, out-of-order
+`cargo test --workspace` runs 46 tests: full protocol round-trips, out-of-order
 and dropped delivery, tamper/MITM rejection, prekey consumption, account
 persistence, an in-memory relay exchange, and a real HTTP round-trip carrying a
 live session.

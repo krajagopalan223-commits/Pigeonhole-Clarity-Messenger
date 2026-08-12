@@ -2,14 +2,15 @@
 // transport (relay/Tor via a worker isolate, or Bluetooth mesh). Persists the
 // account, contacts, and live session state so conversations survive restarts.
 //
-// Routing envelope: transports route by recipient identity only, so each payload
-// is wrapped `{sender, payload}` to tell the recipient which session to use. This
-// exposes the sender identity to the transport — acceptable given identity-based
-// routing; see ARCHITECTURE.md for the metadata-minimization roadmap.
+// Metadata: every payload travels inside a sealed-sender envelope (the sender
+// identity is inside the encryption, not beside it), and relay mail is
+// addressed to rotating inbox IDs instead of identity keys — so the relay sees
+// neither who sent a message nor a stable identifier for who receives it. The
+// mesh still routes by recipient identity (its radio broadcasts presence
+// anyway), but couriers carry the same sealed envelopes. See ARCHITECTURE.md.
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -37,11 +38,19 @@ class AppState extends ChangeNotifier {
   TransportConfig get config => _config;
 
   static const _accountKey = 'clarity.account.v1';
-  static const _contactsKey = 'clarity.contacts.v1';
+  // v2: contact entries carry the X25519 identity-DH (sealing) key. v1 data
+  // (pre-sealed-sender) is simply ignored; this is a pre-release format bump.
+  static const _contactsKey = 'clarity.contacts.v2';
+  static const _lastPollEpochKey = 'clarity.lastPollEpoch.v1';
   static String _sessionKey(String contactId) => 'clarity.session.$contactId.v1';
+
+  /// Widest catch-up window of rotating inboxes polled in one tick (30 days'
+  /// worth); mail parked under inboxes older than the window is left behind.
+  static const _maxPollEpochs = 30;
 
   Account? _account;
   Uint8List? _myIdentity;
+  int? _lastPollEpoch;
 
   RelayWorker? _relay;
   MeshService? _mesh;
@@ -123,12 +132,23 @@ class AppState extends ChangeNotifier {
 
   /// Add a contact by identity key and open an outgoing session.
   Future<void> addContact(Uint8List identity, String displayName) async {
-    final contact = Contact(identity: identity, displayName: displayName);
     final bundle = await _fetchBundle(identity);
     if (bundle == null) {
       throw StateError('no prekey bundle available for that identity');
     }
+    // Verify the bundle's signatures AND that it belongs to the identity that
+    // was asked for — a hostile directory must not be able to answer a lookup
+    // for Bob with a (validly self-signed) bundle for Mallory.
+    final keys = _clarity.bundleIdentityKeys(bundle);
+    if (!listEquals(keys.identityEd, identity)) {
+      throw StateError('directory returned a bundle for a different identity');
+    }
     final session = _account!.initiateSession(bundle);
+    final contact = Contact(
+      identity: identity,
+      identityDh: keys.identityDh,
+      displayName: displayName,
+    );
     _contacts[contact.id] = contact;
     _sessions[contact.id] = session;
     _conversations.putIfAbsent(contact.id, () => []);
@@ -151,8 +171,8 @@ class AppState extends ChangeNotifier {
       throw StateError('no session for contact');
     }
     final wire = session.encrypt(Uint8List.fromList(utf8.encode(text)));
-    final envelope = _wrap(wire);
-    await _transportSend(contact.identity, envelope);
+    final envelope = _account!.sealEnvelope(contact.identityDh, wire);
+    await _transportSend(contact, envelope);
 
     _conversations[contactId]!.add(ChatMessage(
       direction: MessageDirection.outgoing,
@@ -163,15 +183,21 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _transportSend(Uint8List recipient, Uint8List payload) async {
+  Future<void> _transportSend(Contact contact, Uint8List sealed) async {
     if (_relay != null) {
-      await _relay!.send(recipient, payload);
+      // Relay mail is addressed to the contact's rotating inbox, never their
+      // identity; their poll window absorbs clock skew across the boundary.
+      final inbox = _clarity.inboxId(contact.identity, _currentEpoch());
+      await _relay!.send(inbox, sealed);
     } else if (_mesh != null) {
-      await _mesh!.send(recipient, payload);
+      await _mesh!.send(contact.identity, sealed);
     } else {
       throw StateError('no active transport');
     }
   }
+
+  int _currentEpoch() =>
+      _clarity.epochForUnix(DateTime.now().millisecondsSinceEpoch ~/ 1000);
 
   String safetyNumberFor(String contactId) {
     final contact = _contacts[contactId]!;
@@ -190,33 +216,56 @@ class AppState extends ChangeNotifier {
     final relay = _relay;
     final me = _myIdentity;
     if (relay == null || me == null) return;
-    final Uint8List raw;
+
+    // Poll a window of rotating inboxes: from just before the last successful
+    // poll (or yesterday, on first run) through tomorrow, so an epoch rollover
+    // or a skewed sender clock never strands mail.
+    final current = _currentEpoch();
+    var from = (_lastPollEpoch ?? current) - 1;
+    if (from < 0) from = 0;
+    if (current + 1 - from >= _maxPollEpochs) from = current + 1 - _maxPollEpochs;
+    final inboxes = [
+      for (var epoch = from; epoch <= current + 1; epoch++) _clarity.inboxId(me, epoch),
+    ];
+
+    final List<Uint8List> envelopes;
     try {
-      raw = await relay.poll(me);
+      envelopes = await relay.pollMany(inboxes);
     } catch (_) {
       return; // transient; retry next tick
     }
+    if (_lastPollEpoch != current) {
+      _lastPollEpoch = current;
+      unawaited(_storage.write(key: _lastPollEpochKey, value: current.toString()));
+    }
     var changed = false;
-    for (final envelope in decodeByteList(raw)) {
+    for (final envelope in envelopes) {
       if (_handleIncoming(envelope)) changed = true;
     }
     if (changed) notifyListeners();
   }
 
   bool _handleIncoming(Uint8List raw) {
-    final (senderId, payload) = _unwrap(raw);
-    final senderKey = _hex(senderId);
     try {
+      final opened = _account!.openEnvelope(raw);
+      final senderId = opened.senderIdentityEd;
+      final senderKey = _hex(senderId);
       final existing = _sessions[senderKey];
       final Uint8List plaintext;
       if (existing != null) {
-        plaintext = existing.decrypt(payload);
+        plaintext = existing.decrypt(opened.payload);
       } else {
-        final (session, first) = _account!.respondToSession(payload);
+        // The claimed sender is authenticated here: only the real holder of
+        // these identity keys produces a handshake that completes.
+        final (session, first) = _account!.respondToSession(opened.payload);
         _sessions[senderKey] = session;
         _contacts.putIfAbsent(
           senderKey,
-          () => Contact(identity: senderId, displayName: _shortId(senderId)),
+          () => Contact(
+            identity: senderId,
+            identityDh: opened.senderIdentityDh,
+            displayName: _shortId(senderId),
+          ),
         );
         _conversations.putIfAbsent(senderKey, () => []);
         plaintext = first;
@@ -231,7 +280,7 @@ class AppState extends ChangeNotifier {
       unawaited(_persistContacts());
       return true;
     } on ClarityException {
-      return false; // undecryptable: drop
+      return false; // not for us, tampered, or a forged sender claim: drop
     }
   }
 
@@ -250,6 +299,7 @@ class AppState extends ChangeNotifier {
     final list = _contacts.values
         .map((c) => {
               'identity': base64.encode(c.identity),
+              'identityDh': base64.encode(c.identityDh),
               'name': c.displayName,
               'verified': c.verified,
             })
@@ -258,6 +308,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _restoreContactsAndSessions() async {
+    final lastPoll = await _storage.read(key: _lastPollEpochKey);
+    _lastPollEpoch = lastPoll == null ? null : int.tryParse(lastPoll);
+
     final contactsRaw = await _storage.read(key: _contactsKey);
     if (contactsRaw == null) return;
     final list = (jsonDecode(contactsRaw) as List<dynamic>).cast<Map<String, dynamic>>();
@@ -265,6 +318,7 @@ class AppState extends ChangeNotifier {
       final identity = Uint8List.fromList(base64.decode(entry['identity'] as String));
       final contact = Contact(
         identity: identity,
+        identityDh: Uint8List.fromList(base64.decode(entry['identityDh'] as String)),
         displayName: entry['name'] as String,
         verified: entry['verified'] as bool? ?? false,
       );
@@ -282,23 +336,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  // --- envelope + helpers ----------------------------------------------------
-
-  Uint8List _wrap(Uint8List wire) {
-    final env = jsonEncode({
-      'sender': base64.encode(_myIdentity!),
-      'payload': base64.encode(wire),
-    });
-    return Uint8List.fromList(utf8.encode(env));
-  }
-
-  (Uint8List, Uint8List) _unwrap(Uint8List raw) {
-    final map = jsonDecode(utf8.decode(raw)) as Map<String, dynamic>;
-    return (
-      Uint8List.fromList(base64.decode(map['sender'] as String)),
-      Uint8List.fromList(base64.decode(map['payload'] as String)),
-    );
-  }
+  // --- helpers ---------------------------------------------------------------
 
   String _hex(Uint8List b) => b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
   String _shortId(Uint8List id) => '${_hex(id).substring(0, 8)}…';

@@ -4,10 +4,19 @@ import 'dart:typed_data';
 
 /// A contact the user can message, identified by their 32-byte identity key.
 class Contact {
-  Contact({required this.identity, required this.displayName, this.verified = false});
+  Contact({
+    required this.identity,
+    required this.identityDh,
+    required this.displayName,
+    this.verified = false,
+  });
 
   /// 32-byte Ed25519 identity public key.
   final Uint8List identity;
+
+  /// 32-byte X25519 identity DH key — what sealed envelopes to them are
+  /// encrypted to. Learned from their verified bundle or their first envelope.
+  final Uint8List identityDh;
   final String displayName;
 
   /// Whether the user has confirmed this contact's safety number out-of-band.

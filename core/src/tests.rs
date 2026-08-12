@@ -285,3 +285,45 @@ fn wire_bundle_roundtrip() {
     assert_eq!(bundle, decoded);
     assert!(verify_bundle(&decoded).is_ok());
 }
+
+#[test]
+fn sealed_envelope_carries_a_full_conversation() {
+    use crate::envelope::{open_envelope, seal_envelope};
+    use crate::inbox::{epoch_for_unix, inbox_id};
+
+    let alice = Account::generate_with_prekeys(10);
+    let mut bob = Account::generate_with_prekeys(10);
+
+    // Alice learns Bob's keys from his verified bundle, then addresses his
+    // rotating inbox rather than his identity.
+    let bob_bundle = bob.bundle();
+    verify_bundle(&bob_bundle).unwrap();
+    let epoch = epoch_for_unix(1_754_000_000);
+    let bob_inbox = inbox_id(&bob_bundle.identity_ed, epoch);
+    assert_ne!(bob_inbox, bob_bundle.identity_ed);
+
+    // First message: handshake wire bytes ride inside the sealed envelope, so
+    // the initiator identity in the HandshakeHeader is not transport-visible.
+    let mut alice_session = Session::initiate(&alice, &bob_bundle).unwrap();
+    let wire = alice_session.encrypt(b"psst").unwrap().encode();
+    let blob = seal_envelope(&alice, &bob_bundle.identity_dh, &wire);
+    assert!(!contains_subsequence(&blob, &alice.identity_public()));
+    assert!(!contains_subsequence(&blob, &wire));
+
+    // Bob opens the envelope, learns the (claimed) sender, and authenticates
+    // it the real way: by completing the handshake on the inner payload.
+    let opened = open_envelope(&bob, &blob).unwrap();
+    assert_eq!(opened.sender_identity_ed, alice.identity_public());
+    let msg = Message::decode(&opened.payload).unwrap();
+    let (mut bob_session, pt) = Session::respond(&mut bob, &msg).unwrap();
+    assert_eq!(pt, b"psst");
+
+    // Bob replies sealed to the DH key learned from the envelope — no
+    // directory lookup needed.
+    let reply_wire = bob_session.encrypt(b"heard you").unwrap().encode();
+    let reply_blob = seal_envelope(&bob, &opened.sender_identity_dh, &reply_wire);
+    let reply_opened = open_envelope(&alice, &reply_blob).unwrap();
+    assert_eq!(reply_opened.sender_identity_ed, bob.identity_public());
+    let reply_msg = Message::decode(&reply_opened.payload).unwrap();
+    assert_eq!(alice_session.decrypt(&reply_msg).unwrap(), b"heard you");
+}

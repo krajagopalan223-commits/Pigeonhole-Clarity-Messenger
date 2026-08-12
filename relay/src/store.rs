@@ -1,14 +1,15 @@
-//! In-memory relay state: published prekeys and per-recipient message queues.
+//! In-memory relay state: published prekeys and per-mailbox message queues.
 //!
 //! The store never holds plaintext. Bundles are public key material; queued
-//! messages are opaque ciphertext blobs the relay cannot open. Routing is by the
-//! recipient's Ed25519 identity key.
+//! messages are opaque ciphertext blobs the relay cannot open.
 //!
-//! Metadata note: routing by a stable identity key is the simple v1 choice and
-//! *does* expose a contact graph to the relay operator. A production deployment
-//! would route to rotating anonymous inbox IDs (e.g. `BLAKE3(identity ‖ epoch)`)
-//! fetched over an anonymizing transport. That is a transport-layer concern,
-//! deliberately kept separate from this store — see `ARCHITECTURE.md`.
+//! Mailbox keys are **opaque 32-byte values** — the store neither knows nor
+//! cares what they are. Clients route to *rotating anonymous inbox IDs*
+//! (`clarity_core::inbox`, `SHA-256(identity ‖ epoch)`) inside sealed-sender
+//! envelopes, so this store holds no stable recipient identifier and no sender
+//! at all for queued mail. Only the prekey *directory* is identity-keyed —
+//! fetching a bundle for a new contact necessarily names them. Full metadata
+//! story: `ARCHITECTURE.md`.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;

@@ -4,8 +4,9 @@ An honest, section-by-section accounting of what exists in this repository,
 what is deliberately deferred, and what was rejected — mapped against the
 original [Clarity Technical Specification](docs/source/clarity-technical-specification-v1.0.txt).
 
-**Version:** v0.1 foundation · **Tests:** 36 passing across 5 Rust crates ·
-**Code:** ~4,100 lines Rust, ~1,700 lines Dart · **Audited:** no.
+**Version:** v0.1 foundation · **Tests:** 46 Rust (5 crates) + 14 Dart
+(native FFI round trip, mesh bridge, models) · **Code:** ~4,100 lines Rust,
+~1,900 lines Dart · **Audited:** no.
 
 Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 🔜 deferred (planned) · ❌ rejected (with reason)
@@ -26,9 +27,10 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 | Tor transport (`.onion`, SOCKS5) | ✅ |
 | Bluetooth mesh (off-grid, store-carry-forward) | ✅ routing / 🟡 radio |
 | TEE / enclave boundary | ✅ boundary / 🔜 hardware binding |
-| Flutter app (iOS · Android · Linux) | 🟡 code complete, unbuilt |
+| Flutter app — Linux desktop | ✅ built, analyzed, smoke-tested end-to-end |
+| Flutter app — iOS · Android | 🟡 code complete, unbuilt on device |
 | Group messaging | 🔜 (via MLS) |
-| Metadata minimization (sealed sender, rotating IDs) | 🔜 |
+| Metadata minimization (sealed sender, rotating inbox IDs) | ✅ |
 | Onion network of our own, CLR token, steganography | ❌ |
 | Independent security audit | 🔜 **required before real use** |
 
@@ -36,7 +38,7 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 
 ## 2. What is built and tested
 
-### `clarity-core` — the cryptographic core (17 tests)
+### `clarity-core` — the cryptographic core (25 tests)
 `#![forbid(unsafe_code)]`, no home-grown cryptography.
 
 - **Identity & prekeys** — Ed25519 identity key, X25519 identity DH key, signed
@@ -57,18 +59,28 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
   conversations survive an app restart.
 - **Enclave boundary** — a stateless `Enclave` where all secrets cross into the
   untrusted host **only as sealed AEAD blobs** (see [`TEE.md`](TEE.md)).
+- **Sealed-sender envelopes** (spec §8.5) — every payload is encrypted to the
+  recipient's identity DH key with the sender's identity *inside*; transports
+  see only an ephemeral key and ciphertext. Forged sender claims fail the
+  inner handshake and are dropped.
+- **Rotating inbox IDs** (spec §8) — relay mail is addressed to
+  `SHA-256(identity ‖ epoch)` rotating every 24 h (the spec said BLAKE3; same
+  construction, the codebase's existing hash), with a catch-up poll window so
+  offline gaps and clock skew don't strand mail.
 
 Tests cover: bidirectional conversations, 50-message bursts, out-of-order and
 dropped delivery, tamper rejection, MITM/bundle-substitution rejection, one-time
-prekey consumption, mid-conversation serialize/restore, and full conversations
-driven entirely through the sealed enclave ABI.
+prekey consumption, mid-conversation serialize/restore, full conversations
+driven entirely through the sealed enclave ABI, sealed-envelope round trips
+(wrong-recipient/tamper/forgery rejection, pairwise unlinkability), and inbox
+rotation.
 
-### `clarity-relay` — store-and-forward server (3 tests)
+### `clarity-relay` — store-and-forward server (3 tests, opaque mailboxes)
 Prekey directory (one one-time prekey dispensed per fetch) plus an offline
 mailbox holding opaque ciphertext. JSON API: `/publish`, `/bundle`, `/send`,
 `/poll`, `/health`. **Sees no plaintext, ever.**
 
-### `clarity-net` — relay transport, direct or over Tor (3 tests)
+### `clarity-net` — relay transport, direct or over Tor (4 tests)
 Same wire protocol either way; the Tor mode routes through a SOCKS5 proxy
 (system `tor` / Orbot) and supports relays published as `.onion` hidden
 services, so neither the relay nor the network learns the client's IP.
@@ -81,18 +93,29 @@ limits, **carry-forward across a disconnected mesh** (a courier physically
 carries a message between two nodes that never meet), and a real end-to-end
 encrypted message relayed by a courier that cannot read it. See [`MESH.md`](MESH.md).
 
-### `clarity-ffi` — C ABI for the app (7 tests)
+### `clarity-ffi` — C ABI for the app (8 tests)
 Opaque handles with documented ownership rules, plus a hand-written header
 ([`ffi/include/clarity.h`](ffi/include/clarity.h)). Exposes accounts, sessions,
-session persistence, safety numbers, the relay/Tor transport, and the mesh node.
+session persistence, safety numbers, sealed envelopes, rotating inbox IDs,
+verified bundle-key extraction, the relay/Tor transport, and the mesh node.
 Tests drive the whole protocol **through the C ABI only**, including a live
 relay round-trip.
 
-### `app/` — Flutter client (iOS · Android · Linux)
+### `app/` — Flutter client (iOS · Android · Linux) (14 Dart tests)
 One Dart codebase: `dart:ffi` bindings, a memory-safe wrapper, a background
 **isolate** for blocking relay/Tor calls, a mesh bridge, secure-storage
 persistence of account/contacts/sessions, a transport switcher (direct/Tor), and
-chat + safety-number UI.
+chat + safety-number UI. All outgoing payloads are sealed and addressed to
+rotating inboxes; polling walks a persisted catch-up window of epochs, and
+adding a contact now also verifies the fetched bundle belongs to the identity
+that was asked for.
+
+Verified on Linux desktop: `flutter analyze` is clean; the Dart test suite
+drives the real native library through the same FFI wrapper the app uses
+(PQXDH + Double Ratchet round trip, tamper rejection, safety numbers,
+serialize/restore, and mesh delivery over a loopback radio); and a built app
+exchanged live encrypted messages with a second client via `clarity-relay`,
+restoring its account, contact list, and sessions across a restart.
 
 ---
 
@@ -103,7 +126,7 @@ environment. Treat them as **unverified until run on a real target**.
 
 | Item | What's needed |
 |------|---------------|
-| **Flutter app build** | Flutter isn't installed here. Generate runner folders (`flutter create --platforms=android,ios,linux .`), build the native lib (`tool/build_rust.sh`), then `flutter run`. Dart code is unanalyzed and unrun — expect ordinary compile fixes on first build. |
+| **iOS / Android app build** | The Linux desktop build is done (runner committed under `app/linux/`, zero analyzer issues, tests passing, live relay round trip verified). iOS/Android still need their runner folders (`flutter create --platforms=android,ios .`), the native lib (`tool/build_rust.sh android\|ios`), and a first build on a real device. |
 | **Bluetooth radio** | `clarity-mesh` is routing only. A platform plugin must implement the `MeshRadio` interface (Android Nearby/BLE, iOS MultipeerConnectivity, Linux BlueZ). |
 | **Tor on device** | Needs a running Tor: system daemon (Linux), Orbot (Android), or an embedded Tor/Arti (iOS). |
 | **TEE hardware binding** | The enclave sealing key is currently OS-random in process memory. Binding it to Secure Enclave / StrongBox / TPM is per-platform work (see [`TEE.md`](TEE.md) Level 1). |
@@ -115,7 +138,6 @@ environment. Treat them as **unverified until run on a real target**.
 | Feature | Why deferred / what it needs |
 |---------|------------------------------|
 | **Group messaging** (spec §6 TreeKEM) | Should use an audited **MLS (RFC 9420)** library, not a bespoke TreeKEM. The spec's own design signs every group message while claiming deniability — contradictory; MLS handles this deliberately. |
-| **Sealed sender + rotating inbox IDs** (spec §8.5) | The best remaining metadata win: route to `BLAKE3(identity ‖ epoch)` instead of raw identity keys, and hide the sender field. The spec's idea is sound and should be adopted. |
 | **Cover traffic, padding, timing noise** (spec §8.2–8.4) | Fixed-size padding is cheap and worth doing. Cover traffic and timing noise have real battery/latency costs and should be measured, not assumed. |
 | **In-enclave execution** (TEE Level 2) | Running the ratchet inside SGX/TrustZone. Needs the platform SDK and a `no_std` build. |
 | **`no_std` core** | Only required for bare-metal enclaves (Fortanix SGX-EDP, Trusty). Mainstream runtimes (Gramine, Occlum, OP-TEE) run the current `std` build as-is. |
@@ -148,12 +170,20 @@ These were in the source documents and are **not** being built as specified.
 ## 6. Known limitations (say these out loud)
 
 1. **Not audited.** No third party has reviewed this code.
-2. **Metadata.** The relay learns the contact graph unless you run over Tor.
-   Both the relay and the mesh route by a stable identity key today.
+2. **Metadata.** Relay mail is sealed (no visible sender) and addressed to
+   rotating inbox IDs (no stable recipient), so the relay no longer collects a
+   contact graph from mailbox traffic — but it still sees network addresses
+   and timing unless you run over Tor, message counts/sizes (no padding yet),
+   and identity-keyed prekey fetches when someone adds a new contact. The mesh
+   routes by identity and broadcasts presence by design.
 3. **The mesh broadcasts presence.** Joining a Bluetooth mesh announces that you
    run Clarity and roughly where you are. It is for reachability when
    infrastructure is gone — **not** for anonymity. Tor is the opposite trade.
-4. **The app is unbuilt.** Dart code has never been compiled or run.
+4. **Only the Linux build has run.** The app now builds, passes `flutter
+   analyze` with zero issues, passes 14 Dart tests (including a native FFI
+   round trip and the mesh bridge), and has exchanged live encrypted messages
+   with a second client through a relay — on Linux desktop. iOS and Android
+   have still never been compiled; expect ordinary first-build fixes there.
 5. **The relay is a reference implementation** — in-memory, no auth, no rate
    limiting, no durable storage.
 6. **1:1 only.** No group messaging.
@@ -165,10 +195,15 @@ These were in the source documents and are **not** being built as specified.
 
 ## 7. Suggested order of work
 
-1. **Build and run the Flutter app** on one platform end-to-end (Linux is
-   fastest) — this is the first real integration test of the whole stack.
+1. ~~**Build and run the Flutter app** on one platform end-to-end~~ **Done
+   on Linux**: the app builds, boots, publishes its bundle, and exchanges
+   live encrypted messages with a second client through a relay, with
+   account/contacts/sessions surviving a restart. Repeat on Android/iOS.
 2. **Independent security review** of `clarity-core` before anything ships.
-3. **Sealed sender + rotating inbox IDs** — the biggest remaining privacy win.
+3. ~~**Sealed sender + rotating inbox IDs**~~ **Done**: every payload ships in
+   a sealed envelope addressed to a daily-rotating inbox ID, adopted through
+   core, FFI, and the app, and proven live against a relay whose
+   identity-keyed mailboxes stayed empty.
 4. **Bind the enclave key to secure hardware** (TEE Level 1).
 5. **Group messaging via MLS.**
 6. **A Bluetooth radio plugin** to make the mesh real on a device.

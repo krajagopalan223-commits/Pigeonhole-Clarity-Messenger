@@ -73,6 +73,12 @@ impl Account {
         self.ed_signing.verifying_key().to_bytes()
     }
 
+    /// The X25519 identity DH public key — what sealed-sender envelopes
+    /// ([`crate::envelope`]) are encrypted to. Published in the prekey bundle.
+    pub fn identity_dh_public(&self) -> [u8; 32] {
+        PublicKey::from(&self.dh_identity).to_bytes()
+    }
+
     /// Publish a signed prekey bundle. Includes the lowest-id one-time prekey
     /// still available (the relay is responsible for handing out a distinct one
     /// per fetch in a real deployment).

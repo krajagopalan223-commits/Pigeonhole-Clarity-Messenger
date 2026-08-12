@@ -282,3 +282,99 @@ fn mesh_over_ffi() {
         clarity_mesh_node_free(b);
     }
 }
+
+#[test]
+fn sealed_envelopes_and_rotating_inboxes_over_ffi() {
+    unsafe {
+        let alice = clarity_account_generate();
+        let bob = clarity_account_generate();
+
+        // Epoch math and inbox derivation through the ABI.
+        assert_eq!(clarity_epoch_for_unix(0), 0);
+        assert_eq!(clarity_epoch_for_unix(86_400), 1);
+        let mut bob_id = [0u8; 32];
+        clarity_account_identity_public(bob, bob_id.as_mut_ptr());
+        let mut inbox_a = [0u8; 32];
+        let mut inbox_b = [0u8; 32];
+        clarity_inbox_id(bob_id.as_ptr(), 20_000, inbox_a.as_mut_ptr());
+        clarity_inbox_id(bob_id.as_ptr(), 20_001, inbox_b.as_mut_ptr());
+        assert_ne!(inbox_a, inbox_b);
+        assert_ne!(inbox_a, bob_id);
+
+        // Extract + verify bundle identity keys through the ABI.
+        let bundle = take_buffer(clarity_account_bundle_base(bob)).unwrap();
+        let mut bundle_ed = [0u8; 32];
+        let mut bundle_dh = [0u8; 32];
+        assert_eq!(
+            clarity_bundle_identity_keys(
+                bundle.as_ptr(),
+                bundle.len(),
+                bundle_ed.as_mut_ptr(),
+                bundle_dh.as_mut_ptr()
+            ),
+            0
+        );
+        assert_eq!(bundle_ed, bob_id);
+        let mut garbage = bundle.clone();
+        garbage[10] ^= 0xFF;
+        assert_eq!(
+            clarity_bundle_identity_keys(
+                garbage.as_ptr(),
+                garbage.len(),
+                bundle_ed.as_mut_ptr(),
+                bundle_dh.as_mut_ptr()
+            ),
+            -1
+        );
+
+        // Alice seals a real first message to Bob's identity DH key.
+        let session = clarity_session_initiate(alice, bundle.as_ptr(), bundle.len());
+        assert!(!session.is_null());
+        let wire =
+            take_buffer(clarity_session_encrypt(session, b"sealed via abi".as_ptr(), 14)).unwrap();
+        let blob = take_buffer(clarity_seal_envelope(
+            alice,
+            bundle_dh.as_ptr(),
+            wire.as_ptr(),
+            wire.len(),
+        ))
+        .unwrap();
+        let mut alice_id = [0u8; 32];
+        clarity_account_identity_public(alice, alice_id.as_mut_ptr());
+        assert!(!blob.windows(32).any(|w| w == alice_id));
+
+        // Wrong recipient fails opaquely; Bob opens and completes the session.
+        let eve = clarity_account_generate();
+        let mut sender_ed = [0u8; 32];
+        let mut sender_dh = [0u8; 32];
+        assert!(take_buffer(clarity_open_envelope(
+            eve,
+            blob.as_ptr(),
+            blob.len(),
+            sender_ed.as_mut_ptr(),
+            sender_dh.as_mut_ptr()
+        ))
+        .is_none());
+
+        let payload = take_buffer(clarity_open_envelope(
+            bob,
+            blob.as_ptr(),
+            blob.len(),
+            sender_ed.as_mut_ptr(),
+            sender_dh.as_mut_ptr(),
+        ))
+        .unwrap();
+        assert_eq!(sender_ed, alice_id);
+        let mut first_plain = ClarityBuffer::null();
+        let bob_session =
+            clarity_session_respond(bob, payload.as_ptr(), payload.len(), &mut first_plain);
+        assert!(!bob_session.is_null());
+        assert_eq!(take_buffer(first_plain).unwrap(), b"sealed via abi");
+
+        clarity_session_free(session);
+        clarity_session_free(bob_session);
+        clarity_account_free(alice);
+        clarity_account_free(bob);
+        clarity_account_free(eve);
+    }
+}

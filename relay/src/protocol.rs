@@ -32,12 +32,14 @@ pub struct BundleResponse {
     pub bundle: String,
 }
 
-/// `POST /send` — queue a message for a recipient.
+/// `POST /send` — queue a message for a mailbox.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SendRequest {
-    /// base64 of the recipient's 32-byte Ed25519 identity key.
+    /// base64 of the 32-byte mailbox key. Clients pass a *rotating inbox ID*
+    /// (`clarity_core::inbox`), never a raw identity; the relay treats the
+    /// value as opaque either way.
     pub recipient: String,
-    /// base64 of the opaque encoded [`clarity_core::Message`].
+    /// base64 of an opaque sealed envelope (`clarity_core::envelope`).
     pub message: String,
 }
 
