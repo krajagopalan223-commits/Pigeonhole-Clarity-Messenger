@@ -4,7 +4,7 @@ An honest, section-by-section accounting of what exists in this repository,
 what is deliberately deferred, and what was rejected — mapped against the
 original [Clarity Technical Specification](docs/source/clarity-technical-specification-v1.0.txt).
 
-**Version:** v0.1 foundation · **Tests:** 49 Rust (5 crates) + 21 Dart
+**Version:** v0.1 foundation · **Tests:** 53 Rust (5 crates) + 21 Dart
 (native FFI round trip, mesh bridge, models) · **Code:** ~4,100 lines Rust,
 ~1,900 lines Dart · **Audited:** no.
 
@@ -35,6 +35,7 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 | Encrypted message history at rest | ✅ |
 | Disappearing messages (per-conversation retention) | ✅ synced via in-band control (best effort) |
 | One-time prekey replenishment | ✅ auto restock + republish |
+| Relay durability + abuse guards | ✅ file snapshots · mail TTL · size caps · rate limit |
 | Onion network of our own, CLR token, steganography | ❌ |
 | Independent security audit | 🔜 **required before real use** |
 
@@ -80,10 +81,15 @@ driven entirely through the sealed enclave ABI, sealed-envelope round trips
 (wrong-recipient/tamper/forgery rejection, pairwise unlinkability), and inbox
 rotation.
 
-### `clarity-relay` — store-and-forward server (3 tests, opaque mailboxes)
+### `clarity-relay` — store-and-forward server (7 tests, opaque mailboxes)
 Prekey directory (one one-time prekey dispensed per fetch) plus an offline
 mailbox holding opaque ciphertext. JSON API: `/publish`, `/bundle`, `/send`,
-`/poll`, `/health`. **Sees no plaintext, ever.**
+`/poll`, `/health`. **Sees no plaintext, ever.** Optional file-backed
+persistence (atomic snapshots throttled to 1/sec) survives a restart —
+proven by a `kill -9` test that recovers queued mail; queued messages expire
+after a configurable TTL (default 30 days), oversized messages are rejected,
+per-mailbox count/byte caps drop oldest-first, and an optional per-IP rate
+limit sheds abuse. Run `clarity-relay --state FILE --ttl-days N --rate-limit N`.
 
 ### `clarity-net` — relay transport, direct or over Tor (4 tests)
 Same wire protocol either way; the Tor mode routes through a SOCKS5 proxy
@@ -196,8 +202,10 @@ These were in the source documents and are **not** being built as specified.
    round trip and the mesh bridge), and has exchanged live encrypted messages
    with a second client through a relay — on Linux desktop. iOS and Android
    have still never been compiled; expect ordinary first-build fixes there.
-5. **The relay is a reference implementation** — in-memory, no auth, no rate
-   limiting, no durable storage.
+5. **The relay has no authentication.** It now persists to disk, expires and
+   caps queued mail, and rate-limits per IP, but anyone may publish a bundle
+   or poll any mailbox — access control and spam resistance beyond volume
+   caps are out of scope for v0.1.
 6. **1:1 only.** No group messaging.
 7. **Endpoint compromise is out of scope**, as the spec itself acknowledges
    (§2.3). Malware on an unlocked device reads plaintext; no messenger prevents

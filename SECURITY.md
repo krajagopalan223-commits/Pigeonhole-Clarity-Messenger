@@ -24,9 +24,10 @@ it does not, and where the original specification was wrong.
 
 - **Endpoint compromise.** Malware or a physically seized, unlocked device
   reads plaintext. No messenger can prevent this.
-- **Metadata / traffic analysis at the relay.** Absent a Tor-style transport,
-  the relay operator learns the contact graph, timing, and message sizes. See
-  `ARCHITECTURE.md`.
+- **Metadata / traffic analysis at the relay.** Sealed senders and rotating
+  inboxes mean the relay sees no sender and no stable recipient, and padding
+  hides message sizes — but network addresses (absent Tor), timing, and
+  message counts remain. See `ARCHITECTURE.md`.
 - **Coercion.** Rubber-hose key disclosure is a legal/physical problem, not a
   cryptographic one.
 - **Denial of service.** A hostile relay can drop messages (it just can't read
@@ -85,8 +86,10 @@ boundary, whose contract is documented in `ffi/src/lib.rs`.
   to reveal *who wrote to them* (message content keeps forward secrecy from
   the ratchet). This matches Signal's sealed-sender trade-off.
 - **1:1 only**; no group messaging.
-- The relay is **in-memory** (no durable storage, no auth/rate-limiting) — a
-  reference implementation, not a hardened production service.
+- The relay now persists to disk (atomic snapshots), expires and caps queued
+  mail, and rate-limits per IP, but it has **no authentication** — anyone may
+  publish a bundle or poll any mailbox. Access control is out of scope for
+  v0.1; a deployment still wants TLS and network filtering in front.
 
 ## Reporting a vulnerability
 
