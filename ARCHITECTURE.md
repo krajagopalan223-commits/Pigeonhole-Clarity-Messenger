@@ -119,7 +119,9 @@ What the relay operator can **still** learn, stated plainly:
 - **Directory lookups**: fetching a *new* contact's prekey bundle names that
   identity — inherent to a directory. High-volume mailbox traffic no longer
   does.
-- **Counts, sizes, timing**: padding and cover traffic remain future work.
+- **Counts and timing**: sealed payloads are padded to size buckets
+  (512 B → powers of two → 8 KiB steps), so only the bucket is visible — but
+  message counts and timing patterns remain; cover traffic is future work.
 - The **mesh** still routes by identity and broadcasts presence by design;
   couriers now at least carry sealed envelopes they cannot attribute.
 
@@ -138,7 +140,7 @@ than reusing a mature, audited one — so that is explicitly not in scope.
 
 ## Testing
 
-`cargo test --workspace` runs 46 tests: full protocol round-trips, out-of-order
+`cargo test --workspace` runs 49 tests: full protocol round-trips, out-of-order
 and dropped delivery, tamper/MITM rejection, prekey consumption, account
 persistence, an in-memory relay exchange, and a real HTTP round-trip carrying a
 live session.

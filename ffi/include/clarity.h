@@ -47,6 +47,10 @@ ClarityAccount *clarity_account_deserialize(const uint8_t *ptr, size_t len);
 void clarity_account_identity_public(const ClarityAccount *acct, uint8_t *out /* 32 bytes */);
 ClarityBuffer clarity_account_bundle_base(const ClarityAccount *acct);
 ClarityBuffer clarity_account_one_time_publics(const ClarityAccount *acct); /* JSON */
+/* one-time prekey pool: check local stock, mint more when low (then persist
+ * the account and republish the bundle) */
+uint32_t clarity_account_one_time_remaining(const ClarityAccount *acct);
+int32_t clarity_account_replenish_prekeys(ClarityAccount *acct, uint32_t count);
 
 /* Sessions */
 ClaritySession *clarity_session_initiate(const ClarityAccount *acct,

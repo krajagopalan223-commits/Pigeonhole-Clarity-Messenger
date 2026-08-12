@@ -41,7 +41,9 @@ fn main() {
     println!("my identity: {}", B64.encode(my_id));
 
     let mut session = Session::initiate(&me, &bundle).expect("bundle verified + session opened");
-    let wire = session.encrypt(text.as_bytes()).expect("encrypt").encode();
+    // Inside the encryption, chat messages use the app's typed content schema.
+    let content = serde_json::json!({"v": 1, "t": "text", "body": text}).to_string();
+    let wire = session.encrypt(content.as_bytes()).expect("encrypt").encode();
 
     // Seal the wire message (sender identity travels inside the encryption)
     // and address the recipient's rotating inbox for the current epoch — the
@@ -74,12 +76,22 @@ fn main() {
                 };
                 match session.decrypt(&msg) {
                     Ok(plain) => {
-                        println!(
-                            "decrypted reply from {}: {:?}",
-                            B64.encode(opened.sender_identity_ed),
-                            String::from_utf8_lossy(&plain)
-                        );
-                        return;
+                        let sender = B64.encode(opened.sender_identity_ed);
+                        // Typed content: show text bodies and timer controls
+                        // distinctly; anything else prints raw.
+                        match serde_json::from_slice::<serde_json::Value>(&plain) {
+                            Ok(v) if v["v"] == 1 && v["t"] == "text" => {
+                                println!("decrypted reply from {sender}: {:?}", v["body"].as_str().unwrap_or(""));
+                                return;
+                            }
+                            Ok(v) if v["v"] == 1 && v["t"] == "timer" => {
+                                println!("timer control from {sender}: retention = {:?} seconds", v["seconds"]);
+                            }
+                            _ => {
+                                println!("decrypted reply from {sender}: {:?}", String::from_utf8_lossy(&plain));
+                                return;
+                            }
+                        }
                     }
                     Err(e) => println!("undecryptable envelope: {e:?}"),
                 }
