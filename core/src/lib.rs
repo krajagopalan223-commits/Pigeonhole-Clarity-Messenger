@@ -39,9 +39,11 @@
 #![forbid(unsafe_code)]
 
 pub mod enclave;
+pub mod envelope;
 pub mod error;
 pub mod handshake;
 pub mod identity;
+pub mod inbox;
 pub mod kdf;
 pub mod pqkem;
 pub mod ratchet;
@@ -51,8 +53,10 @@ pub mod transport;
 pub mod wire;
 
 pub use enclave::{Enclave, Sealed};
+pub use envelope::{open_envelope, seal_envelope, OpenedEnvelope, SEALED_ENVELOPE_VERSION};
 pub use error::{Error, Result};
 pub use identity::{verify_bundle, Account};
+pub use inbox::{epoch_for_unix, inbox_id, inbox_window, INBOX_EPOCH_SECONDS};
 pub use safety::safety_number;
 pub use session::Session;
 pub use transport::{MessageTransport, TransportError};

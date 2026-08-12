@@ -13,16 +13,21 @@
 //! Both move the *same* opaque payloads; carriers in a mesh, like the relay,
 //! only ever see ciphertext.
 
-/// A message transport addressed by 32-byte identity keys.
+/// A message transport addressed by opaque 32-byte mailbox keys.
 ///
-/// `send` hands an opaque, already-encrypted payload toward a recipient;
-/// `receive` returns payloads addressed to `me`. Neither the relay nor a mesh
-/// carrier can read a payload — that guarantee comes from the layers above.
+/// The address is whatever the caller routes by: for relay traffic that should
+/// be a *rotating inbox ID* ([`crate::inbox`]) rather than a raw identity key,
+/// so the carrier never holds a stable recipient identifier; the mesh still
+/// routes by identity (its radio broadcasts presence anyway). `send` hands an
+/// opaque, already-encrypted payload toward an address; `receive` returns
+/// payloads queued for `me`. Neither the relay nor a mesh carrier can read a
+/// payload — that guarantee comes from the layers above (and with sealed
+/// envelopes, [`crate::envelope`], they cannot read the sender either).
 pub trait MessageTransport {
-    /// Route an opaque payload toward `recipient`.
+    /// Route an opaque payload toward a mailbox address.
     fn send(&self, recipient: &[u8; 32], payload: &[u8]) -> Result<(), TransportError>;
 
-    /// Collect any payloads addressed to `me` that this transport has for us.
+    /// Collect any payloads queued for the mailbox address `me`.
     fn receive(&self, me: &[u8; 32]) -> Result<Vec<Vec<u8>>, TransportError>;
 }
 
