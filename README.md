@@ -123,7 +123,9 @@ No "unbreakable," no "MI6-grade," no metadata magic.
   anonymity. It exists for reachability when infrastructure is gone.
 - **Endpoint compromise is out of scope.** Malware on an unlocked device reads
   plaintext. No messenger prevents that.
-- **No group messaging yet**, and **no independent audit yet**.
+- **Group messaging is not wired into the app yet.** The MLS core crate is
+  built and tested; the FFI and UI are still to come. **No independent audit
+  yet.**
 
 ## Architecture
 
@@ -146,6 +148,7 @@ docs/    source/        the original Clarity documents, verbatim
 | [`clarity-relay`](relay) | Zero-plaintext directory + durable opaque-mailbox store (TTL, caps, rate limit) | ✅ 7 |
 | [`clarity-net`](net) | Relay transport with first-class Tor (SOCKS5/`.onion`) | ✅ 4 |
 | [`clarity-mesh`](mesh) | Bluetooth mesh routing (flooding, dedup, carry-forward) | ✅ 6 |
+| [`clarity-group`](group) | Group messaging via MLS / RFC 9420 (OpenMLS) — core crate | ✅ 4 |
 | [`app`](app) | Flutter UI, FFI bindings, isolate worker, mesh bridge | ✅ 21 (Linux build verified; iOS/Android unbuilt) |
 
 Because the core is transport-agnostic, all three transports implement one
@@ -223,7 +226,7 @@ Requires a recent Rust toolchain (built and tested on 1.94).
 
 ```bash
 # Build and test everything
-cargo test --workspace          # 53 tests
+cargo test --workspace          # 57 tests
 
 # Run a local relay (memory-only)
 cargo run -p clarity-relay -- 127.0.0.1:8080
@@ -262,7 +265,7 @@ libraries, and publishing the relay as an onion service — are in
 ## Testing
 
 ```bash
-cargo test --workspace     # 53 tests
+cargo test --workspace     # 57 tests
 cargo clippy --workspace --all-targets   # clean
 ```
 
@@ -298,11 +301,13 @@ live-tested).
 **Needs device work:** iOS/Android app builds · Bluetooth radio plugin · Tor on
 device · TEE hardware key binding.
 
-**Deferred:** group messaging (via MLS) · padding/cover traffic · `no_std`
+**Deferred:** group messaging **app integration** (the MLS core crate is
+built) · cover traffic · `no_std`
 core · multi-device recovery · disappearing messages · **independent audit**.
 
-**Next up, in order:** get an independent review of `clarity-core` → bind
-enclave keys to secure hardware → groups via MLS → cover traffic.
+**Next up, in order:** get an independent review of `clarity-core` → wire
+groups (FFI + app) on the built MLS crate → bind enclave keys to secure
+hardware → cover traffic.
 
 ## Documentation map
 

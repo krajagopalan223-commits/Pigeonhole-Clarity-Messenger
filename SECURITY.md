@@ -49,7 +49,8 @@ fixed, not implemented as written:
    bugs, not security — removed.
 4. **Signing every group message while also claiming deniability.** Signatures
    give *non-repudiation*, the opposite of deniability. Group messaging is
-   deferred to MLS, which handles this deliberately.
+   built on **MLS (RFC 9420)** via the audited OpenMLS library (`clarity-group`),
+   which handles this deliberately, rather than the spec's bespoke TreeKEM.
 5. **Fabricated audits, a token economy, and "MI6-grade / unbreakable"
    marketing.** Removed. This code is **unaudited**; it says so plainly.
 6. **A bespoke onion network and steganographic transports.** These are worse
@@ -85,7 +86,9 @@ boundary, whose contract is documented in `ffi/src/lib.rs`.
   of a recipient's long-term identity DH key lets recorded envelopes be opened
   to reveal *who wrote to them* (message content keeps forward secrecy from
   the ratchet). This matches Signal's sealed-sender trade-off.
-- **1:1 only**; no group messaging.
+- **Group messaging is not yet in the app.** The MLS layer (`clarity-group`,
+  built on OpenMLS) is implemented and tested, but the FFI and UI to use it
+  are follow-up work; 1:1 is what ships end-to-end today.
 - The relay now persists to disk (atomic snapshots), expires and caps queued
   mail, and rate-limits per IP, but it has **no authentication** — anyone may
   publish a bundle or poll any mailbox. Access control is out of scope for
