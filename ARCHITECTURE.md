@@ -67,7 +67,10 @@ Two responsibilities, nothing more:
 2. **Offline mailbox** — queues opaque messages per recipient until they poll.
 
 A small `tiny_http` JSON API exposes `/publish`, `/bundle`, `/send`, `/poll`,
-`/health`. TLS is expected from a reverse proxy in front.
+`/health`. TLS is expected from a reverse proxy in front. With `--state FILE`
+it persists prekeys and queued mail as atomic bincode snapshots (surviving a
+restart); queued mail expires on a TTL, per-mailbox count/byte caps bound
+memory, and an optional per-IP rate limit sheds abuse.
 
 ### `app` (Flutter/Dart)
 
@@ -140,7 +143,7 @@ than reusing a mature, audited one — so that is explicitly not in scope.
 
 ## Testing
 
-`cargo test --workspace` runs 49 tests: full protocol round-trips, out-of-order
+`cargo test --workspace` runs 53 tests: full protocol round-trips, out-of-order
 and dropped delivery, tamper/MITM rejection, prekey consumption, account
 persistence, an in-memory relay exchange, and a real HTTP round-trip carrying a
 live session.

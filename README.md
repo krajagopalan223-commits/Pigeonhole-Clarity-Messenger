@@ -143,7 +143,7 @@ docs/    source/        the original Clarity documents, verbatim
 |-------|---------|-------|
 | [`clarity-core`](core) | Identity, PQXDH, Double Ratchet, safety numbers, sealed envelopes, rotating inboxes, enclave boundary | ✅ 27 |
 | [`clarity-ffi`](ffi) | C ABI over the core for Flutter/`dart:ffi` | ✅ 9 |
-| [`clarity-relay`](relay) | Zero-plaintext prekey directory + opaque-mailbox store | ✅ 3 |
+| [`clarity-relay`](relay) | Zero-plaintext directory + durable opaque-mailbox store (TTL, caps, rate limit) | ✅ 7 |
 | [`clarity-net`](net) | Relay transport with first-class Tor (SOCKS5/`.onion`) | ✅ 4 |
 | [`clarity-mesh`](mesh) | Bluetooth mesh routing (flooding, dedup, carry-forward) | ✅ 6 |
 | [`app`](app) | Flutter UI, FFI bindings, isolate worker, mesh bridge | ✅ 21 (Linux build verified; iOS/Android unbuilt) |
@@ -223,10 +223,15 @@ Requires a recent Rust toolchain (built and tested on 1.94).
 
 ```bash
 # Build and test everything
-cargo test --workspace          # 49 tests
+cargo test --workspace          # 53 tests
 
-# Run a local relay
+# Run a local relay (memory-only)
 cargo run -p clarity-relay -- 127.0.0.1:8080
+
+# ...or a durable one: persist state, expire mail after 30 days,
+# rate-limit to 240 requests/min per IP
+cargo run -p clarity-relay -- 127.0.0.1:8080 \
+  --state relay-state.bin --ttl-days 30 --rate-limit 240
 ```
 
 ### Running the app
@@ -257,7 +262,7 @@ libraries, and publishing the relay as an onion service — are in
 ## Testing
 
 ```bash
-cargo test --workspace     # 49 tests
+cargo test --workspace     # 53 tests
 cargo clippy --workspace --all-targets   # clean
 ```
 
@@ -297,8 +302,7 @@ device · TEE hardware key binding.
 core · multi-device recovery · disappearing messages · **independent audit**.
 
 **Next up, in order:** get an independent review of `clarity-core` → bind
-enclave keys to secure hardware → groups via MLS → relay hardening (durable
-storage, rate limits) → cover traffic.
+enclave keys to secure hardware → groups via MLS → cover traffic.
 
 ## Documentation map
 
