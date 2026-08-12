@@ -140,7 +140,7 @@ than reusing a mature, audited one — so that is explicitly not in scope.
 
 ## Testing
 
-`cargo test --workspace` runs 48 tests: full protocol round-trips, out-of-order
+`cargo test --workspace` runs 49 tests: full protocol round-trips, out-of-order
 and dropped delivery, tamper/MITM rejection, prekey consumption, account
 persistence, an in-memory relay exchange, and a real HTTP round-trip carrying a
 live session.

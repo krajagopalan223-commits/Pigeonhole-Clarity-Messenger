@@ -172,5 +172,7 @@ Account, contacts, live Double Ratchet **session state, and message history
 are persisted** via `flutter_secure_storage` (Keychain / Android Keystore /
 libsecret), so conversations — including their text — survive an app restart.
 Each conversation has a **disappearing-messages timer** (off / 1 h / 1 d /
-1 w) that deletes older messages from this device's history; the timer is not
-yet synced to the contact, and the UI says so.
+1 w) that deletes older messages from stored history. Changing it sends an
+in-band control message so the contact's app applies the same timer —
+best-effort by design: a compliant client honors it, but no protocol can
+force a hostile client to delete its copy.

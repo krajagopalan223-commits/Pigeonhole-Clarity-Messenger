@@ -142,11 +142,11 @@ docs/    source/        the original Clarity documents, verbatim
 | Crate | Purpose | Tests |
 |-------|---------|-------|
 | [`clarity-core`](core) | Identity, PQXDH, Double Ratchet, safety numbers, sealed envelopes, rotating inboxes, enclave boundary | ✅ 27 |
-| [`clarity-ffi`](ffi) | C ABI over the core for Flutter/`dart:ffi` | ✅ 8 |
+| [`clarity-ffi`](ffi) | C ABI over the core for Flutter/`dart:ffi` | ✅ 9 |
 | [`clarity-relay`](relay) | Zero-plaintext prekey directory + opaque-mailbox store | ✅ 3 |
 | [`clarity-net`](net) | Relay transport with first-class Tor (SOCKS5/`.onion`) | ✅ 4 |
 | [`clarity-mesh`](mesh) | Bluetooth mesh routing (flooding, dedup, carry-forward) | ✅ 6 |
-| [`app`](app) | Flutter UI, FFI bindings, isolate worker, mesh bridge | ✅ 14 (Linux build verified; iOS/Android unbuilt) |
+| [`app`](app) | Flutter UI, FFI bindings, isolate worker, mesh bridge | ✅ 21 (Linux build verified; iOS/Android unbuilt) |
 
 Because the core is transport-agnostic, all three transports implement one
 `MessageTransport` trait — the app can hold a `dyn MessageTransport` and switch
@@ -223,7 +223,7 @@ Requires a recent Rust toolchain (built and tested on 1.94).
 
 ```bash
 # Build and test everything
-cargo test --workspace          # 48 tests
+cargo test --workspace          # 49 tests
 
 # Run a local relay
 cargo run -p clarity-relay -- 127.0.0.1:8080
@@ -257,7 +257,7 @@ libraries, and publishing the relay as an onion service — are in
 ## Testing
 
 ```bash
-cargo test --workspace     # 48 tests
+cargo test --workspace     # 49 tests
 cargo clippy --workspace --all-targets   # clean
 ```
 
@@ -286,8 +286,9 @@ against the original specification.
 **Built & tested:** E2E encryption · PQ handshake · Double Ratchet · signed
 prekey bundles · safety numbers · sealed-sender envelopes · rotating inbox IDs ·
 size-bucket padding · session/account/history persistence · disappearing
-messages (local) · relay · Tor transport · mesh routing · enclave boundary ·
-C ABI · Linux app (built, analyzed, live-tested).
+messages (synced in-band) · prekey replenishment · relay · Tor transport ·
+mesh routing · enclave boundary · C ABI · Linux app (built, analyzed,
+live-tested).
 
 **Needs device work:** iOS/Android app builds · Bluetooth radio plugin · Tor on
 device · TEE hardware key binding.
@@ -296,8 +297,8 @@ device · TEE hardware key binding.
 core · multi-device recovery · disappearing messages · **independent audit**.
 
 **Next up, in order:** get an independent review of `clarity-core` → bind
-enclave keys to secure hardware → groups via MLS → cover traffic + synced
-disappearing-message timers.
+enclave keys to secure hardware → groups via MLS → relay hardening (durable
+storage, rate limits) → cover traffic.
 
 ## Documentation map
 

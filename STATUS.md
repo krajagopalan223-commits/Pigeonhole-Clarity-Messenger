@@ -4,7 +4,7 @@ An honest, section-by-section accounting of what exists in this repository,
 what is deliberately deferred, and what was rejected — mapped against the
 original [Clarity Technical Specification](docs/source/clarity-technical-specification-v1.0.txt).
 
-**Version:** v0.1 foundation · **Tests:** 48 Rust (5 crates) + 14 Dart
+**Version:** v0.1 foundation · **Tests:** 49 Rust (5 crates) + 21 Dart
 (native FFI round trip, mesh bridge, models) · **Code:** ~4,100 lines Rust,
 ~1,900 lines Dart · **Audited:** no.
 
@@ -33,7 +33,8 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 | Metadata minimization (sealed sender, rotating inbox IDs) | ✅ |
 | Message size padding (bucketed sealed payloads) | ✅ |
 | Encrypted message history at rest | ✅ |
-| Disappearing messages (per-conversation retention) | ✅ local / 🔜 synced to contact |
+| Disappearing messages (per-conversation retention) | ✅ synced via in-band control (best effort) |
+| One-time prekey replenishment | ✅ auto restock + republish |
 | Onion network of our own, CLR token, steganography | ❌ |
 | Independent security audit | 🔜 **required before real use** |
 
@@ -97,15 +98,16 @@ limits, **carry-forward across a disconnected mesh** (a courier physically
 carries a message between two nodes that never meet), and a real end-to-end
 encrypted message relayed by a courier that cannot read it. See [`MESH.md`](MESH.md).
 
-### `clarity-ffi` — C ABI for the app (8 tests)
+### `clarity-ffi` — C ABI for the app (9 tests)
 Opaque handles with documented ownership rules, plus a hand-written header
 ([`ffi/include/clarity.h`](ffi/include/clarity.h)). Exposes accounts, sessions,
 session persistence, safety numbers, sealed envelopes, rotating inbox IDs,
-verified bundle-key extraction, the relay/Tor transport, and the mesh node.
+verified bundle-key extraction, one-time-prekey stock checks and
+replenishment, the relay/Tor transport, and the mesh node.
 Tests drive the whole protocol **through the C ABI only**, including a live
 relay round-trip.
 
-### `app/` — Flutter client (iOS · Android · Linux) (14 Dart tests)
+### `app/` — Flutter client (iOS · Android · Linux) (21 Dart tests)
 One Dart codebase: `dart:ffi` bindings, a memory-safe wrapper, a background
 **isolate** for blocking relay/Tor calls, a mesh bridge, secure-storage
 persistence of account/contacts/sessions, a transport switcher (direct/Tor), and
@@ -113,9 +115,12 @@ chat + safety-number UI. All outgoing payloads are sealed and addressed to
 rotating inboxes; polling walks a persisted catch-up window of epochs, and
 adding a contact now also verifies the fetched bundle belongs to the identity
 that was asked for. Conversation history persists encrypted at rest (OS secure
-storage) with a per-conversation disappearing-messages timer — retention is
-enforced on this device only and says so in the UI; syncing the timer to the
-contact is future protocol work.
+storage). Inside the encryption, messages use a small versioned content schema
+(text | timer update, with plain-text fallback), so the per-conversation
+disappearing-messages timer propagates to the contact as an in-band control
+message — best effort: a compliant client applies it, nothing can force a
+hostile one. The one-time prekey pool auto-replenishes when it runs low (new
+secrets persisted, bundle republished).
 
 Verified on Linux desktop: `flutter analyze` is clean; the Dart test suite
 drives the real native library through the same FFI wrapper the app uses
