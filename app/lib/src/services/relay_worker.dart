@@ -14,6 +14,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import '../ffi/clarity.dart' show decodeByteList;
 import '../ffi/clarity_bindings.dart';
 import 'transport_config.dart';
 
@@ -70,6 +71,13 @@ class RelayWorker {
   /// with `decodeByteList`).
   Future<Uint8List> poll(Uint8List recipient) async {
     return await _call('poll', {'recipient': recipient}) as Uint8List;
+  }
+
+  /// Drain several mailboxes (a rotating-inbox window) in one isolate round
+  /// trip, returning the individual envelopes in delivery order.
+  Future<List<Uint8List>> pollMany(List<Uint8List> inboxes) async {
+    final result = await _call('pollMany', {'inboxes': inboxes});
+    return (result as List).cast<Uint8List>();
   }
 
   void dispose() {
@@ -168,6 +176,20 @@ class RelayWorker {
         } finally {
           malloc.free(recipient.ptr);
         }
+      case 'pollMany':
+        final inboxes = (args['inboxes'] as List).cast<Uint8List>();
+        final envelopes = <Uint8List>[];
+        for (final inbox in inboxes) {
+          final id = _toNative(inbox);
+          try {
+            final buf = b.relayPoll(t, id.ptr);
+            if (buf.ptr == nullptr) throw StateError('poll transport error');
+            envelopes.addAll(decodeByteList(_takeBuffer(b, buf)));
+          } finally {
+            malloc.free(id.ptr);
+          }
+        }
+        return envelopes;
       default:
         throw StateError('unknown command $cmd');
     }

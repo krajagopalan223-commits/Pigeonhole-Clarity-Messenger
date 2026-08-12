@@ -13,7 +13,11 @@ void main() {
   group('Contact', () {
     test('id is lowercase hex of the identity key', () {
       final identity = Uint8List.fromList(List.generate(32, (i) => i));
-      final contact = Contact(identity: identity, displayName: 'A');
+      final contact = Contact(
+        identity: identity,
+        identityDh: Uint8List.fromList(List.generate(32, (i) => 255 - i)),
+        displayName: 'A',
+      );
       expect(contact.id, hasLength(64));
       expect(contact.id.startsWith('000102030405'), isTrue);
       expect(contact.id, contact.id.toLowerCase());

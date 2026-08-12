@@ -159,10 +159,11 @@ but joining one **broadcasts your presence**. See `../MESH.md`.
 - **Bundle fetch needs a relay.** In pure-mesh mode there is no prekey
   directory, so contacts must exchange bundles some other way; today
   `addContact` requires a relay transport.
-- **Routing is by stable identity key**, which exposes a contact graph to the
-  relay operator (and the sender identity to mesh couriers). See
-  `../ARCHITECTURE.md` for the intended mitigation: run over Tor, and move to
-  rotating inbox IDs.
+- **Relay metadata is minimized, not erased.** Payloads travel in sealed
+  envelopes addressed to rotating inbox IDs, so the relay sees no sender and
+  no stable recipient — but it still sees your network address (run over Tor),
+  timing/sizes, and identity-keyed bundle fetches when adding a new contact.
+  Mesh couriers carry sealed envelopes but route by recipient identity.
 - **1:1 messaging only.** Group messaging (MLS/TreeKEM) is deferred to a
   dedicated, audited implementation.
 

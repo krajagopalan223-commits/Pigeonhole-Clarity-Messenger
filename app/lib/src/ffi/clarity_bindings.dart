@@ -96,6 +96,23 @@ typedef _RelaySend = int Function(Pointer<RelayTransport>, Pointer<Uint8>, Point
 typedef _RelayPollNative = ClarityBuffer Function(Pointer<RelayTransport>, Pointer<Uint8>);
 typedef _RelayPoll = ClarityBuffer Function(Pointer<RelayTransport>, Pointer<Uint8>);
 
+// Sealed sender + rotating inboxes
+typedef _EpochForUnixNative = Uint64 Function(Uint64);
+typedef _EpochForUnix = int Function(int);
+typedef _InboxIdNative = Void Function(Pointer<Uint8>, Uint64, Pointer<Uint8>);
+typedef _InboxId = void Function(Pointer<Uint8>, int, Pointer<Uint8>);
+typedef _BundleIdentityKeysNative = Int32 Function(
+    Pointer<Uint8>, Size, Pointer<Uint8>, Pointer<Uint8>);
+typedef _BundleIdentityKeys = int Function(Pointer<Uint8>, int, Pointer<Uint8>, Pointer<Uint8>);
+typedef _SealEnvelopeNative = ClarityBuffer Function(
+    Pointer<ClarityAccount>, Pointer<Uint8>, Pointer<Uint8>, Size);
+typedef _SealEnvelope = ClarityBuffer Function(
+    Pointer<ClarityAccount>, Pointer<Uint8>, Pointer<Uint8>, int);
+typedef _OpenEnvelopeNative = ClarityBuffer Function(
+    Pointer<ClarityAccount>, Pointer<Uint8>, Size, Pointer<Uint8>, Pointer<Uint8>);
+typedef _OpenEnvelope = ClarityBuffer Function(
+    Pointer<ClarityAccount>, Pointer<Uint8>, int, Pointer<Uint8>, Pointer<Uint8>);
+
 // Mesh
 typedef _MeshNewNative = Pointer<MeshNode> Function(Pointer<Uint8>);
 typedef _MeshNew = Pointer<MeshNode> Function(Pointer<Uint8>);
@@ -159,6 +176,15 @@ class ClarityBindings {
             lib.lookupFunction<_RelayFetchNative, _RelayFetch>('clarity_relay_fetch_bundle'),
         relaySend = lib.lookupFunction<_RelaySendNative, _RelaySend>('clarity_relay_send'),
         relayPoll = lib.lookupFunction<_RelayPollNative, _RelayPoll>('clarity_relay_poll'),
+        epochForUnix =
+            lib.lookupFunction<_EpochForUnixNative, _EpochForUnix>('clarity_epoch_for_unix'),
+        inboxId = lib.lookupFunction<_InboxIdNative, _InboxId>('clarity_inbox_id'),
+        bundleIdentityKeys = lib.lookupFunction<_BundleIdentityKeysNative, _BundleIdentityKeys>(
+            'clarity_bundle_identity_keys'),
+        sealEnvelope =
+            lib.lookupFunction<_SealEnvelopeNative, _SealEnvelope>('clarity_seal_envelope'),
+        openEnvelope =
+            lib.lookupFunction<_OpenEnvelopeNative, _OpenEnvelope>('clarity_open_envelope'),
         meshNew = lib.lookupFunction<_MeshNewNative, _MeshNew>('clarity_mesh_node_new'),
         meshFree = lib.lookupFunction<_MeshFreeNative, _MeshFree>('clarity_mesh_node_free'),
         meshOriginate =
@@ -194,6 +220,11 @@ class ClarityBindings {
   final _RelayFetch relayFetch;
   final _RelaySend relaySend;
   final _RelayPoll relayPoll;
+  final _EpochForUnix epochForUnix;
+  final _InboxId inboxId;
+  final _BundleIdentityKeys bundleIdentityKeys;
+  final _SealEnvelope sealEnvelope;
+  final _OpenEnvelope openEnvelope;
   final _MeshNew meshNew;
   final _MeshFree meshFree;
   final _MeshOriginate meshOriginate;

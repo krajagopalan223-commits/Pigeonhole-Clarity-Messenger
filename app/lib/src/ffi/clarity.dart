@@ -57,6 +57,44 @@ class Clarity {
     }
   }
 
+  /// The inbox epoch (24-hour window) containing `unixSeconds`.
+  int epochForUnix(int unixSeconds) => _b.epochForUnix(unixSeconds);
+
+  /// The rotating inbox ID a contact's relay mail is addressed to in `epoch`.
+  Uint8List inboxId(Uint8List identity, int epoch) {
+    final id = _toNative(identity);
+    final out = malloc<Uint8>(32);
+    try {
+      _b.inboxId(id, epoch, out);
+      return Uint8List.fromList(out.asTypedList(32));
+    } finally {
+      malloc.free(id);
+      malloc.free(out);
+    }
+  }
+
+  /// Decode and signature-verify a prekey bundle, returning the owner's
+  /// Ed25519 identity and X25519 identity-DH (sealing) keys.
+  ({Uint8List identityEd, Uint8List identityDh}) bundleIdentityKeys(Uint8List bundle) {
+    final input = _toNative(bundle);
+    final outEd = malloc<Uint8>(32);
+    final outDh = malloc<Uint8>(32);
+    try {
+      final rc = _b.bundleIdentityKeys(input, bundle.length, outEd, outDh);
+      if (rc != 0) {
+        throw const ClarityException('bundle rejected (bad signature or malformed)');
+      }
+      return (
+        identityEd: Uint8List.fromList(outEd.asTypedList(32)),
+        identityDh: Uint8List.fromList(outDh.asTypedList(32)),
+      );
+    } finally {
+      malloc.free(input);
+      malloc.free(outEd);
+      malloc.free(outDh);
+    }
+  }
+
   /// Compute the 60-digit safety number for two identity keys.
   String safetyNumber(Uint8List idA, Uint8List idB) {
     final a = _toNative(idA);
@@ -164,12 +202,65 @@ class Account {
     }
   }
 
+  /// Seal a payload to a recipient's X25519 identity DH key. Our identity
+  /// keys travel *inside* the encryption; the transport sees only an
+  /// ephemeral key and ciphertext.
+  Uint8List sealEnvelope(Uint8List recipientIdentityDh, Uint8List payload) {
+    final c = Clarity.instance();
+    final dh = c._toNative(recipientIdentityDh);
+    final input = c._toNative(payload);
+    try {
+      return c._takeBuffer(_b.sealEnvelope(_handle, dh, input, payload.length));
+    } finally {
+      malloc.free(dh);
+      malloc.free(input);
+    }
+  }
+
+  /// Open a sealed envelope addressed to this account. Throws
+  /// [ClarityException] for anything malformed, tampered, or sealed to
+  /// someone else. The claimed sender is only authenticated by successfully
+  /// decrypting [OpenedEnvelope.payload] with a session.
+  OpenedEnvelope openEnvelope(Uint8List blob) {
+    final c = Clarity.instance();
+    final input = c._toNative(blob);
+    final outEd = malloc<Uint8>(32);
+    final outDh = malloc<Uint8>(32);
+    try {
+      final payload =
+          c._takeBuffer(_b.openEnvelope(_handle, input, blob.length, outEd, outDh));
+      return OpenedEnvelope(
+        senderIdentityEd: Uint8List.fromList(outEd.asTypedList(32)),
+        senderIdentityDh: Uint8List.fromList(outDh.asTypedList(32)),
+        payload: payload,
+      );
+    } finally {
+      malloc.free(input);
+      malloc.free(outEd);
+      malloc.free(outDh);
+    }
+  }
+
   void dispose() {
     if (_disposed) return;
     _b.accountFree(_ptr);
     _ptr = nullptr;
     _disposed = true;
   }
+}
+
+/// A successfully opened sealed envelope: who claims to have sent it (verify
+/// by decrypting!), their sealing key for replies, and the inner wire bytes.
+class OpenedEnvelope {
+  OpenedEnvelope({
+    required this.senderIdentityEd,
+    required this.senderIdentityDh,
+    required this.payload,
+  });
+
+  final Uint8List senderIdentityEd;
+  final Uint8List senderIdentityDh;
+  final Uint8List payload;
 }
 
 /// One end of an encrypted conversation. Dispose with [dispose].

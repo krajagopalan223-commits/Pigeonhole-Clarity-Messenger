@@ -143,6 +143,72 @@ void main() {
       bob.dispose();
     });
 
+    test('rotating inbox IDs are deterministic and epoch-dependent', () {
+      final alice = clarity.generateAccount();
+      final id = alice.identityPublic();
+
+      expect(clarity.epochForUnix(0), 0);
+      expect(clarity.epochForUnix(86400), 1);
+      expect(clarity.inboxId(id, 20000), clarity.inboxId(id, 20000));
+      expect(clarity.inboxId(id, 20000), isNot(clarity.inboxId(id, 20001)));
+      expect(clarity.inboxId(id, 20000), isNot(id));
+
+      alice.dispose();
+    });
+
+    test('bundle identity keys are extracted only from a valid bundle', () {
+      final bob = clarity.generateAccount();
+      final bundle = bob.bundleBase();
+
+      final keys = clarity.bundleIdentityKeys(bundle);
+      expect(keys.identityEd, bob.identityPublic());
+      expect(keys.identityDh, hasLength(32));
+
+      final tampered = Uint8List.fromList(bundle);
+      tampered[10] ^= 0xFF;
+      expect(() => clarity.bundleIdentityKeys(tampered),
+          throwsA(isA<ClarityException>()));
+
+      bob.dispose();
+    });
+
+    test('sealed envelope hides the sender and round-trips a session', () {
+      final alice = clarity.generateAccount();
+      final bob = clarity.generateAccount();
+      final eve = clarity.generateAccount();
+
+      final bobKeys = clarity.bundleIdentityKeys(bob.bundleBase());
+      final aliceSession = alice.initiateSession(bob.bundleBase());
+      final wire = aliceSession.encrypt(utf8Bytes('sealed hello'));
+      final blob = alice.sealEnvelope(bobKeys.identityDh, wire);
+
+      // The blob carries no sender-linked bytes for the transport to read.
+      final aliceId = alice.identityPublic();
+      for (var i = 0; i + 32 <= blob.length; i++) {
+        expect(blob.sublist(i, i + 32), isNot(aliceId));
+      }
+
+      // Only Bob opens it; the sender is authenticated by the handshake.
+      expect(() => eve.openEnvelope(blob), throwsA(isA<ClarityException>()));
+      final opened = bob.openEnvelope(blob);
+      expect(opened.senderIdentityEd, aliceId);
+      final (bobSession, plain) = bob.respondToSession(opened.payload);
+      expect(utf8.decode(plain), 'sealed hello');
+
+      // Bob replies sealed to the DH key learned from the envelope.
+      final replyBlob =
+          bob.sealEnvelope(opened.senderIdentityDh, bobSession.encrypt(utf8Bytes('back')));
+      final replyOpened = alice.openEnvelope(replyBlob);
+      expect(replyOpened.senderIdentityEd, bob.identityPublic());
+      expect(utf8.decode(aliceSession.decrypt(replyOpened.payload)), 'back');
+
+      aliceSession.dispose();
+      bobSession.dispose();
+      alice.dispose();
+      bob.dispose();
+      eve.dispose();
+    });
+
     test('mesh bridge delivers an end-to-end encrypted payload', () async {
       final alice = clarity.generateAccount();
       final bob = clarity.generateAccount();
