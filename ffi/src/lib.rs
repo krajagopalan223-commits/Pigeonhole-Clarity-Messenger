@@ -360,6 +360,122 @@ pub unsafe extern "C" fn clarity_safety_number(id_a: *const u8, id_b: *const u8)
     }
 }
 
+// --- Sealed sender + rotating inboxes ---------------------------------------
+
+/// The inbox epoch (24-hour window) containing `unix_seconds`.
+#[no_mangle]
+pub extern "C" fn clarity_epoch_for_unix(unix_seconds: u64) -> u64 {
+    clarity_core::epoch_for_unix(unix_seconds)
+}
+
+/// Write the 32-byte rotating inbox ID for (`identity`, `epoch`) to `out`.
+/// Relay mail should be sent to / polled from these instead of raw identities.
+///
+/// # Safety
+/// `identity` must point to 32 readable bytes; `out` to 32 writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn clarity_inbox_id(identity: *const u8, epoch: u64, out: *mut u8) {
+    if identity.is_null() || out.is_null() {
+        return;
+    }
+    let mut id = [0u8; 32];
+    ptr::copy_nonoverlapping(identity, id.as_mut_ptr(), 32);
+    let inbox = clarity_core::inbox_id(&id, epoch);
+    ptr::copy_nonoverlapping(inbox.as_ptr(), out, 32);
+}
+
+/// Decode **and signature-verify** an encoded prekey bundle, extracting the
+/// owner's identity keys: 32 bytes Ed25519 to `out_identity_ed`, 32 bytes
+/// X25519 (the sealed-envelope encryption key) to `out_identity_dh`.
+/// Returns 0 on success, -1 on decode or signature failure.
+///
+/// # Safety
+/// The bundle region must be readable; both out pointers must accept 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn clarity_bundle_identity_keys(
+    bundle_ptr: *const u8,
+    bundle_len: usize,
+    out_identity_ed: *mut u8,
+    out_identity_dh: *mut u8,
+) -> i32 {
+    if out_identity_ed.is_null() || out_identity_dh.is_null() {
+        return -1;
+    }
+    let bundle = match PreKeyBundle::decode(as_slice(bundle_ptr, bundle_len)) {
+        Ok(b) => b,
+        Err(_) => return -1,
+    };
+    if clarity_core::verify_bundle(&bundle).is_err() {
+        return -1;
+    }
+    ptr::copy_nonoverlapping(bundle.identity_ed.as_ptr(), out_identity_ed, 32);
+    ptr::copy_nonoverlapping(bundle.identity_dh.as_ptr(), out_identity_dh, 32);
+    0
+}
+
+/// Seal a payload to a recipient's X25519 identity DH key. The sender's
+/// identity keys travel *inside* the encryption; the returned blob shows the
+/// transport nothing but a fresh ephemeral key and ciphertext. Returns a null
+/// buffer on error.
+///
+/// # Safety
+/// `acct` must be valid; `recipient_identity_dh` must point to 32 readable
+/// bytes; the payload region must be readable.
+#[no_mangle]
+pub unsafe extern "C" fn clarity_seal_envelope(
+    acct: *const Account,
+    recipient_identity_dh: *const u8,
+    payload_ptr: *const u8,
+    payload_len: usize,
+) -> ClarityBuffer {
+    let account = match acct.as_ref() {
+        Some(a) => a,
+        None => return ClarityBuffer::null(),
+    };
+    if recipient_identity_dh.is_null() {
+        return ClarityBuffer::null();
+    }
+    let mut dh = [0u8; 32];
+    ptr::copy_nonoverlapping(recipient_identity_dh, dh.as_mut_ptr(), 32);
+    let payload = as_slice(payload_ptr, payload_len);
+    ClarityBuffer::from_vec(clarity_core::seal_envelope(account, &dh, payload))
+}
+
+/// Open a sealed envelope with this account's identity DH key. On success,
+/// writes the sender's claimed Ed25519 identity to `out_sender_ed` and their
+/// X25519 identity DH key (for sealing replies) to `out_sender_dh`, and
+/// returns the inner payload. Returns a null buffer on any failure —
+/// malformed, tampered, or sealed to someone else. The claimed sender is
+/// authenticated only by successfully decrypting the inner payload.
+///
+/// # Safety
+/// `acct` must be valid; the blob region must be readable; both out pointers
+/// must accept 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn clarity_open_envelope(
+    acct: *const Account,
+    blob_ptr: *const u8,
+    blob_len: usize,
+    out_sender_ed: *mut u8,
+    out_sender_dh: *mut u8,
+) -> ClarityBuffer {
+    let account = match acct.as_ref() {
+        Some(a) => a,
+        None => return ClarityBuffer::null(),
+    };
+    if out_sender_ed.is_null() || out_sender_dh.is_null() {
+        return ClarityBuffer::null();
+    }
+    match clarity_core::open_envelope(account, as_slice(blob_ptr, blob_len)) {
+        Ok(opened) => {
+            ptr::copy_nonoverlapping(opened.sender_identity_ed.as_ptr(), out_sender_ed, 32);
+            ptr::copy_nonoverlapping(opened.sender_identity_dh.as_ptr(), out_sender_dh, 32);
+            ClarityBuffer::from_vec(opened.payload)
+        }
+        Err(_) => ClarityBuffer::null(),
+    }
+}
+
 pub mod mesh_ffi;
 pub mod transport_ffi;
 

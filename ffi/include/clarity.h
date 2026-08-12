@@ -72,6 +72,29 @@ ClaritySession *clarity_session_deserialize(const uint8_t *ptr, size_t len);
 char *clarity_safety_number(const uint8_t *id_a /* 32 */, const uint8_t *id_b /* 32 */);
 
 /*
+ * Sealed sender + rotating inboxes (metadata protection).
+ * Relay mail is addressed to clarity_inbox_id(identity, epoch) — a mailbox
+ * key that rotates every 24h — and wrapped by clarity_seal_envelope so the
+ * transport sees neither sender nor a stable recipient identifier.
+ */
+uint64_t clarity_epoch_for_unix(uint64_t unix_seconds);
+void clarity_inbox_id(const uint8_t *identity /* 32 */, uint64_t epoch,
+                      uint8_t *out /* 32 */);
+/* decode + signature-verify a bundle; extract owner identity keys. 0 ok, -1 fail */
+int32_t clarity_bundle_identity_keys(const uint8_t *bundle_ptr, size_t bundle_len,
+                                     uint8_t *out_identity_ed /* 32 */,
+                                     uint8_t *out_identity_dh /* 32 */);
+ClarityBuffer clarity_seal_envelope(const ClarityAccount *acct,
+                                    const uint8_t *recipient_identity_dh /* 32 */,
+                                    const uint8_t *payload, size_t payload_len);
+/* NULL-ptr buffer on failure; sender keys are written only on success and the
+ * claimed sender is authenticated by decrypting the returned inner payload */
+ClarityBuffer clarity_open_envelope(const ClarityAccount *acct,
+                                    const uint8_t *blob, size_t blob_len,
+                                    uint8_t *out_sender_ed /* 32 */,
+                                    uint8_t *out_sender_dh /* 32 */);
+
+/*
  * Relay transport (direct or via Tor). All calls BLOCK — invoke from a
  * background thread/isolate. Multi-item results use the list encoding:
  *   [uint32 count]( [uint32 len][bytes] )*   (all little-endian)
