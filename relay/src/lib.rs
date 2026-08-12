@@ -21,8 +21,8 @@ pub mod protocol;
 pub mod server;
 pub mod store;
 
-pub use server::{serve, serve_on};
-pub use store::{split_bundle, RelayStore};
+pub use server::{serve, serve_on, serve_on_with, serve_with, ServeOptions};
+pub use store::{split_bundle, RelayStore, StoreError, StoreLimits};
 
 #[cfg(test)]
 mod tests;

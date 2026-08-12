@@ -178,6 +178,7 @@ name = "clarity-relay"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "bincode",
  "clarity-core",
  "serde",
  "serde_json",
