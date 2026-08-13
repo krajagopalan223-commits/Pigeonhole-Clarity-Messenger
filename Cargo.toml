@@ -6,6 +6,7 @@ members = [
     "relay",
     "net",
     "mesh",
+    "group",
 ]
 
 [workspace.package]

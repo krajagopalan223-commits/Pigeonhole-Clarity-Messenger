@@ -72,6 +72,20 @@ it persists prekeys and queued mail as atomic bincode snapshots (surviving a
 restart); queued mail expires on a TTL, per-mailbox count/byte caps bound
 memory, and an optional per-IP rate limit sheds abuse.
 
+### `clarity-group` (Rust)
+
+Group messaging via **MLS (RFC 9420)**, built on the audited **OpenMLS**
+library rather than a bespoke TreeKEM. A `GroupClient` is a user's MLS
+identity and key store (it publishes key packages much as a 1:1 identity
+publishes a prekey bundle, and its whole state exports for encrypted-at-rest
+storage); a `Group` is one conversation. Adding a member yields a *commit*
+(fan out to existing members) and a *welcome* (send to the newcomer); every
+inbound blob — application message or membership change — is processed
+uniformly. All bytes are transport-ready MLS messages, so group traffic rides
+the same sealed-envelope + relay path as 1:1 traffic and the relay learns
+nothing new. This crate is the tested protocol foundation; FFI + app wiring
+(group UI, commit fan-out) is follow-up work.
+
 ### `app` (Flutter/Dart)
 
 `dart:ffi` bindings → a safe `Account`/`Session` wrapper → `AppState` (sessions,
@@ -138,12 +152,11 @@ than reusing a mature, audited one — so that is explicitly not in scope.
 | Custom decentralized relay network + PBFT + token | A separate distributed-systems/economics project; Tor + simple relays cover the need. |
 | Steganographic transports (TCP ISN, DNS, etc.) | Largely detectable in practice; Tor pluggable transports do this better and safer. |
 | NFC dead drops | Niche transport with little v1 value. (The Bluetooth mesh, by contrast, *is* built — routing tested, radio plugin pending; see `MESH.md`.) |
-| Group messaging | Should use an audited **MLS** (RFC 9420) library, not a bespoke TreeKEM. |
 | PQ *ratchet* (not just handshake) | We match Signal's PQXDH: PQ on setup. A PQ ratchet is a live research area. |
 
 ## Testing
 
-`cargo test --workspace` runs 53 tests: full protocol round-trips, out-of-order
+`cargo test --workspace` runs 57 tests: full protocol round-trips, out-of-order
 and dropped delivery, tamper/MITM rejection, prekey consumption, account
 persistence, an in-memory relay exchange, and a real HTTP round-trip carrying a
 live session.

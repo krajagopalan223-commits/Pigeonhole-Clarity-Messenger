@@ -4,7 +4,7 @@ An honest, section-by-section accounting of what exists in this repository,
 what is deliberately deferred, and what was rejected — mapped against the
 original [Clarity Technical Specification](docs/source/clarity-technical-specification-v1.0.txt).
 
-**Version:** v0.1 foundation · **Tests:** 53 Rust (5 crates) + 21 Dart
+**Version:** v0.1 foundation · **Tests:** 57 Rust (6 crates) + 21 Dart
 (native FFI round trip, mesh bridge, models) · **Code:** ~4,100 lines Rust,
 ~1,900 lines Dart · **Audited:** no.
 
@@ -29,7 +29,7 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 | TEE / enclave boundary | ✅ boundary / 🔜 hardware binding |
 | Flutter app — Linux desktop | ✅ built, analyzed, smoke-tested end-to-end |
 | Flutter app — iOS · Android | 🟡 code complete, unbuilt on device |
-| Group messaging | 🔜 (via MLS) |
+| Group messaging (MLS / RFC 9420) | ✅ core crate / 🟡 FFI + app integration |
 | Metadata minimization (sealed sender, rotating inbox IDs) | ✅ |
 | Message size padding (bucketed sealed payloads) | ✅ |
 | Encrypted message history at rest | ✅ |
@@ -80,6 +80,20 @@ prekey consumption, mid-conversation serialize/restore, full conversations
 driven entirely through the sealed enclave ABI, sealed-envelope round trips
 (wrong-recipient/tamper/forgery rejection, pairwise unlinkability), and inbox
 rotation.
+
+### `clarity-group` — group messaging via MLS (4 tests)
+An RFC 9420 group layer built on the audited **OpenMLS** library — not a
+bespoke TreeKEM. A `GroupClient` is a user's MLS identity + key store
+(publishes key packages like a prekey bundle; whole state exports for
+encrypted-at-rest storage); a `Group` is one conversation (create, add member
+→ commit + welcome, remove member → commit, send/process application
+messages). All bytes are transport-ready MLS messages that ride the existing
+sealed-envelope + relay path, so the relay learns nothing new. Tests prove a
+3-member group exchanging messages both ways, that a **removed member cannot
+read post-removal traffic** (MLS post-compromise security), client
+export/import across a restart with the conversation continuing, and rejection
+of garbage and cross-group messages. **Foundation only** — FFI and app
+integration (group UI, commit fan-out over the relay) are follow-up work.
 
 ### `clarity-relay` — store-and-forward server (7 tests, opaque mailboxes)
 Prekey directory (one one-time prekey dispensed per fetch) plus an offline
@@ -155,7 +169,6 @@ environment. Treat them as **unverified until run on a real target**.
 
 | Feature | Why deferred / what it needs |
 |---------|------------------------------|
-| **Group messaging** (spec §6 TreeKEM) | Should use an audited **MLS (RFC 9420)** library, not a bespoke TreeKEM. The spec's own design signs every group message while claiming deniability — contradictory; MLS handles this deliberately. |
 | **Cover traffic, timing noise** (spec §8.3–8.4) | Size padding is **done** (sealed payloads pad to 512 B–8 KiB power-of-two buckets, then 8 KiB steps). Cover traffic and timing noise have real battery/latency costs and should be measured, not assumed. |
 | **In-enclave execution** (TEE Level 2) | Running the ratchet inside SGX/TrustZone. Needs the platform SDK and a `no_std` build. |
 | **`no_std` core** | Only required for bare-metal enclaves (Fortanix SGX-EDP, Trusty). Mainstream runtimes (Gramine, Occlum, OP-TEE) run the current `std` build as-is. |
@@ -206,7 +219,9 @@ These were in the source documents and are **not** being built as specified.
    caps queued mail, and rate-limits per IP, but anyone may publish a bundle
    or poll any mailbox — access control and spam resistance beyond volume
    caps are out of scope for v0.1.
-6. **1:1 only.** No group messaging.
+6. **Groups are built but not wired in.** The MLS layer (`clarity-group`, on
+   OpenMLS) is implemented and tested, but only 1:1 messaging is exposed
+   through the FFI and app today; group FFI + UI are the next integration step.
 7. **Endpoint compromise is out of scope**, as the spec itself acknowledges
    (§2.3). Malware on an unlocked device reads plaintext; no messenger prevents
    this.
@@ -225,5 +240,4 @@ These were in the source documents and are **not** being built as specified.
    core, FFI, and the app, and proven live against a relay whose
    identity-keyed mailboxes stayed empty.
 4. **Bind the enclave key to secure hardware** (TEE Level 1).
-5. **Group messaging via MLS.**
 6. **A Bluetooth radio plugin** to make the mesh real on a device.
