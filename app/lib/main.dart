@@ -4,8 +4,12 @@
 //   flutter run --dart-define=CLARITY_RELAY=https://relay.example.org
 //   flutter run --dart-define=CLARITY_TOR=true --dart-define=CLARITY_SOCKS=127.0.0.1:9050
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
+import 'src/services/bluez_radio.dart';
+import 'src/services/mesh_service.dart';
 import 'src/services/transport_config.dart';
 import 'src/state/app_state.dart';
 import 'src/ui/home_screen.dart';
@@ -20,6 +24,11 @@ TransportConfig _initialConfig() => const TransportConfig(
       torSocks: _torSocks,
     );
 
+/// The platform Bluetooth radio backing mesh mode, where one exists.
+/// Linux talks to bluetoothd over D-Bus; other platforms have no radio yet,
+/// so selecting mesh mode there reports "no MeshRadio was provided".
+MeshRadio? _platformRadio() => Platform.isLinux ? BlueZMeshRadio() : null;
+
 void main() {
   runApp(const ClarityApp());
 }
@@ -32,7 +41,8 @@ class ClarityApp extends StatefulWidget {
 }
 
 class _ClarityAppState extends State<ClarityApp> {
-  late final AppState _state = AppState(config: _initialConfig());
+  late final AppState _state =
+      AppState(config: _initialConfig(), meshRadio: _platformRadio());
   late final Future<void> _init = _state.initialize();
 
   @override

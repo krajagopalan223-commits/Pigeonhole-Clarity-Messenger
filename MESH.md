@@ -70,13 +70,37 @@ as the relay/Tor transport, the app can hold `Box<dyn MessageTransport>` and pic
 per conversation — or even run several at once.
 
 ### Platform radios
-- **Android:** BLE GATT + the **Nearby Connections** / Wi-Fi Direct APIs
-  (`flutter` plugins such as `nearby_connections`). Most capable; background
-  operation is workable within OS limits.
-- **iOS:** **MultipeerConnectivity** (Bluetooth + peer Wi-Fi) or Core Bluetooth.
-  Background BLE is heavily restricted, so the mesh is strongest in the
-  foreground.
-- **Linux/desktop:** BlueZ.
+
+- **Linux/desktop: ✅ built** — `BlueZMeshRadio`
+  (`app/lib/src/services/bluez_radio.dart`), pure Dart over the BlueZ D-Bus
+  API, no native plugin. Every node plays both BLE roles at once:
+  - *Peripheral:* registers a GATT service (one write-only "RX"
+    characteristic) and an LE advertisement carrying the Clarity service UUID,
+    so nearby nodes can find us and write frames to us.
+  - *Central:* scans for that UUID, connects to every peer it finds, and
+    writes outbound frames to *their* RX characteristic.
+
+  Mesh frames (padded, routinely kilobytes) far exceed a single BLE write, so
+  each link carries a `[u32-le length][frame]` byte stream sliced into
+  MTU-sized chunks over acknowledged, ordered ATT writes; the receiver
+  reassembles per sender and resets that sender's buffer on disconnect, so a
+  torn stream can't poison a later session. Duplicate delivery (two nodes
+  connected in both directions) is harmless — the routing layer dedups by
+  `msg_id`.
+
+  Tested against a **mock bluetoothd** on a private D-Bus bus exercising the
+  daemon's real contract: adapter power + discovery filter, GATT application
+  registration read back via `GetManagedObjects`, peer discovery → connect →
+  chunked writes both directions, interleaved multi-peer reassembly,
+  torn-stream reset, and stop/restart. **Not yet run against a physical BLE
+  adapter** — that first two-machine run is the remaining step, and needs
+  `bluetoothd` running and a BLE-capable adapter.
+- **Android: unwritten.** BLE GATT + the **Nearby Connections** / Wi-Fi Direct
+  APIs (`flutter` plugins such as `nearby_connections`). Most capable;
+  background operation is workable within OS limits.
+- **iOS: unwritten.** **MultipeerConnectivity** (Bluetooth + peer Wi-Fi) or
+  Core Bluetooth. Background BLE is heavily restricted, so the mesh is
+  strongest in the foreground.
 
 ### Privacy hardening (roadmap)
 The `recipient` field is visible to couriers (metadata). A production build should

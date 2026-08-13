@@ -149,7 +149,7 @@ docs/    source/        the original Clarity documents, verbatim
 | [`clarity-net`](net) | Relay transport with first-class Tor (SOCKS5/`.onion`) | ✅ 4 |
 | [`clarity-mesh`](mesh) | Bluetooth mesh routing (flooding, dedup, carry-forward) | ✅ 6 |
 | [`clarity-group`](group) | Group messaging via MLS / RFC 9420 (OpenMLS) — core crate | ✅ 4 |
-| [`app`](app) | Flutter UI, FFI bindings, isolate worker, mesh bridge | ✅ 21 (Linux build verified; iOS/Android unbuilt) |
+| [`app`](app) | Flutter UI, FFI bindings, isolate worker, mesh bridge + BlueZ radio | ✅ 31 (Linux build verified; iOS/Android unbuilt) |
 
 Because the core is transport-agnostic, all three transports implement one
 `MessageTransport` trait — the app can hold a `dyn MessageTransport` and switch
@@ -298,8 +298,9 @@ messages (synced in-band) · prekey replenishment · relay · Tor transport ·
 mesh routing · enclave boundary · C ABI · Linux app (built, analyzed,
 live-tested).
 
-**Needs device work:** iOS/Android app builds · Bluetooth radio plugin · Tor on
-device · TEE hardware key binding.
+**Needs device work:** iOS/Android app builds · first real-adapter run of the
+Linux Bluetooth radio, then Android/iOS radio plugins · Tor on device · TEE
+hardware key binding.
 
 **Deferred:** group messaging **app integration** (the MLS core crate is
 built) · cover traffic · `no_std`

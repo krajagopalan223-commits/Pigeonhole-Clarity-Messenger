@@ -12,6 +12,7 @@ lib/
   src/services/transport_config.dart  transport mode (direct / Tor / mesh)
   src/services/relay_worker.dart   background isolate owning the relay/Tor transport
   src/services/mesh_service.dart   mesh bridge + MeshRadio interface
+  src/services/bluez_radio.dart    Linux MeshRadio: BLE via the BlueZ D-Bus API
   src/state/app_state.dart         account, sessions, contacts, persistence, polling
   src/models/models.dart           UI data models
   src/ui/                          home + chat screens
@@ -54,7 +55,10 @@ library through the same wrapper the app uses — PQXDH handshake, Double
 Ratchet both directions, tamper rejection, safety numbers, account/session
 serialize-restore, and mesh delivery over a loopback radio. It needs
 `libclarity_ffi.so` on the loader path and skips itself (with instructions)
-when the library is missing:
+when the library is missing. `test/bluez_radio_test.dart` covers the Linux
+Bluetooth radio: the frame chunking/reassembly protocol, plus the whole radio
+lifecycle against a mock bluetoothd on a private D-Bus bus (no hardware or
+native library needed):
 
 ```bash
 tool/build_rust.sh linux          # from the repo root, once
@@ -139,11 +143,19 @@ Tor can also be toggled at runtime from the transport button in the app bar.
 
 ## Enabling the Bluetooth mesh
 
-`clarity-mesh` provides the routing; the app must supply the radio. Implement
-the `MeshRadio` interface (in `src/services/mesh_service.dart`) with a platform
-plugin — Android Nearby Connections / BLE, iOS MultipeerConnectivity, or BlueZ
-on Linux — and pass it to `AppState(meshRadio: ...)`. Then select
-`TransportMode.mesh`.
+`clarity-mesh` provides the routing; the app supplies the radio behind the
+`MeshRadio` interface (in `src/services/mesh_service.dart`).
+
+**Linux ships one**: `main.dart` automatically passes `BlueZMeshRadio` (BLE
+over the BlueZ D-Bus API — no native plugin) to `AppState` on Linux, so
+selecting `TransportMode.mesh` in the UI just works, provided `bluetoothd` is
+running and the machine has a BLE-capable adapter. It is verified against a
+mock bluetoothd; a first run against real adapters is still pending — see
+`../MESH.md`.
+
+**Android/iOS don't yet**: implement `MeshRadio` with a platform plugin —
+Android Nearby Connections / BLE, iOS MultipeerConnectivity — and pass it to
+`AppState(meshRadio: ...)`.
 
 Note the trade-off before enabling it: the mesh works with no internet at all,
 but joining one **broadcasts your presence**. See `../MESH.md`.

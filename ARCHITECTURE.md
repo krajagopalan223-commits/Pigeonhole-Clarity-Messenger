@@ -89,7 +89,10 @@ nothing new. This crate is the tested protocol foundation; FFI + app wiring
 ### `app` (Flutter/Dart)
 
 `dart:ffi` bindings → a safe `Account`/`Session` wrapper → `AppState` (sessions,
-contacts, poll loop) → Material UI. Talks to the relay over HTTPS.
+contacts, poll loop) → Material UI. Talks to the relay over HTTPS. On Linux the
+mesh transport is backed by a real radio: `BlueZMeshRadio` speaks the BlueZ
+D-Bus API (GATT service + LE advertisement inbound, scan + connect + chunked
+characteristic writes outbound) — see `MESH.md`.
 
 ## Message flow
 
@@ -151,7 +154,7 @@ than reusing a mature, audited one — so that is explicitly not in scope.
 |------------------------------|-------------------|
 | Custom decentralized relay network + PBFT + token | A separate distributed-systems/economics project; Tor + simple relays cover the need. |
 | Steganographic transports (TCP ISN, DNS, etc.) | Largely detectable in practice; Tor pluggable transports do this better and safer. |
-| NFC dead drops | Niche transport with little v1 value. (The Bluetooth mesh, by contrast, *is* built — routing tested, radio plugin pending; see `MESH.md`.) |
+| NFC dead drops | Niche transport with little v1 value. (The Bluetooth mesh, by contrast, *is* built — routing tested, Linux BlueZ radio written and mock-verified, phone radios pending; see `MESH.md`.) |
 | PQ *ratchet* (not just handshake) | We match Signal's PQXDH: PQ on setup. A PQ ratchet is a live research area. |
 
 ## Testing

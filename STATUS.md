@@ -4,9 +4,9 @@ An honest, section-by-section accounting of what exists in this repository,
 what is deliberately deferred, and what was rejected — mapped against the
 original [Clarity Technical Specification](docs/source/clarity-technical-specification-v1.0.txt).
 
-**Version:** v0.1 foundation · **Tests:** 57 Rust (6 crates) + 21 Dart
+**Version:** v0.1 foundation · **Tests:** 57 Rust (6 crates) + 31 Dart
 (native FFI round trip, mesh bridge, models) · **Code:** ~4,100 lines Rust,
-~1,900 lines Dart · **Audited:** no.
+~2,700 lines Dart · **Audited:** no.
 
 Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 🔜 deferred (planned) · ❌ rejected (with reason)
@@ -25,7 +25,7 @@ Legend: ✅ built & tested · 🟡 built, needs device/integration work ·
 | Session + account persistence | ✅ |
 | Store-and-forward relay (offline delivery) | ✅ |
 | Tor transport (`.onion`, SOCKS5) | ✅ |
-| Bluetooth mesh (off-grid, store-carry-forward) | ✅ routing / 🟡 radio |
+| Bluetooth mesh (off-grid, store-carry-forward) | ✅ routing · ✅ Linux radio (BlueZ, mock-verified) / 🟡 phone radios |
 | TEE / enclave boundary | ✅ boundary / 🔜 hardware binding |
 | Flutter app — Linux desktop | ✅ built, analyzed, smoke-tested end-to-end |
 | Flutter app — iOS · Android | 🟡 code complete, unbuilt on device |
@@ -127,9 +127,13 @@ replenishment, the relay/Tor transport, and the mesh node.
 Tests drive the whole protocol **through the C ABI only**, including a live
 relay round-trip.
 
-### `app/` — Flutter client (iOS · Android · Linux) (21 Dart tests)
+### `app/` — Flutter client (iOS · Android · Linux) (31 Dart tests)
 One Dart codebase: `dart:ffi` bindings, a memory-safe wrapper, a background
-**isolate** for blocking relay/Tor calls, a mesh bridge, secure-storage
+**isolate** for blocking relay/Tor calls, a mesh bridge **with a real Linux
+Bluetooth radio** (`BlueZMeshRadio`, pure Dart over the BlueZ D-Bus API — both
+BLE roles at once: a GATT service + LE advertisement so peers can write to us,
+and a scanner that connects to peers and writes to theirs, with frames chunked
+into an ordered `[u32-le length][frame]` stream per link), secure-storage
 persistence of account/contacts/sessions, a transport switcher (direct/Tor), and
 chat + safety-number UI. All outgoing payloads are sealed and addressed to
 rotating inboxes; polling walks a persisted catch-up window of epochs, and
@@ -147,7 +151,11 @@ drives the real native library through the same FFI wrapper the app uses
 (PQXDH + Double Ratchet round trip, tamper rejection, safety numbers,
 serialize/restore, and mesh delivery over a loopback radio); and a built app
 exchanged live encrypted messages with a second client via `clarity-relay`,
-restoring its account, contact list, and sessions across a restart.
+restoring its account, contact list, and sessions across a restart. The BlueZ
+radio is tested against a **mock bluetoothd** speaking the real D-Bus contract
+(adapter setup, GATT registration, discovery, connect, chunked writes both
+directions, torn-stream reset on disconnect, stop/restart) — everything except
+actual radio waves, which still need a machine with a BLE adapter.
 
 ---
 
@@ -159,7 +167,7 @@ environment. Treat them as **unverified until run on a real target**.
 | Item | What's needed |
 |------|---------------|
 | **iOS / Android app build** | The Linux desktop build is done (runner committed under `app/linux/`, zero analyzer issues, tests passing, live relay round trip verified). iOS/Android still need their runner folders (`flutter create --platforms=android,ios .`), the native lib (`tool/build_rust.sh android\|ios`), and a first build on a real device. |
-| **Bluetooth radio** | `clarity-mesh` is routing only. A platform plugin must implement the `MeshRadio` interface (Android Nearby/BLE, iOS MultipeerConnectivity, Linux BlueZ). |
+| **Bluetooth radio** | **Linux is done in code**: `BlueZMeshRadio` implements `MeshRadio` over the BlueZ D-Bus API and is tested against a mock bluetoothd — it still needs a first run on a machine with a real BLE adapter. Android (Nearby/BLE) and iOS (MultipeerConnectivity) radios remain unwritten. |
 | **Tor on device** | Needs a running Tor: system daemon (Linux), Orbot (Android), or an embedded Tor/Arti (iOS). |
 | **TEE hardware binding** | The enclave sealing key is currently OS-random in process memory. Binding it to Secure Enclave / StrongBox / TPM is per-platform work (see [`TEE.md`](TEE.md) Level 1). |
 
@@ -240,4 +248,6 @@ These were in the source documents and are **not** being built as specified.
    core, FFI, and the app, and proven live against a relay whose
    identity-keyed mailboxes stayed empty.
 4. **Bind the enclave key to secure hardware** (TEE Level 1).
-6. **A Bluetooth radio plugin** to make the mesh real on a device.
+6. **Run the mesh over real Bluetooth** — the Linux BlueZ radio is written and
+   mock-verified; it needs two machines with BLE adapters, then Android/iOS
+   radio plugins.
